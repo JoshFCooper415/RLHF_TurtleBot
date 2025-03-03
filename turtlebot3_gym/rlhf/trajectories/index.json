@@ -1,0 +1,310 @@
+{
+  "episode_0_1740528250.6086104": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_0_1740528250.6086104.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740528250.6086178
+  },
+  "episode_1_1740528301.3488138": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_1_1740528301.3488138.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740528301.3488233
+  },
+  "episode_0_1740533657.161697": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_0_1740533657.161697.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740533657.1617079
+  },
+  "episode_1_1740533718.001225": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_1_1740533718.001225.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740533718.001235
+  },
+  "episode_2_1740533778.834299": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_2_1740533778.834299.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740533778.8343093
+  },
+  "episode_0_1740534379.5272684": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_0_1740534379.5272684.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740534379.5272794
+  },
+  "episode_1_1740534440.3803847": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_1_1740534440.3803847.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740534440.380396
+  },
+  "episode_2_1740534501.2479203": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_2_1740534501.2479203.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740534501.2479312
+  },
+  "episode_0_1740588756.893948": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_0_1740588756.893948.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740588756.8939588
+  },
+  "episode_1_1740588817.736281": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_1_1740588817.736281.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740588817.736291
+  },
+  "episode_2_1740588878.578774": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_2_1740588878.578774.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740588878.5787842
+  },
+  "episode_3_1740588939.4095378": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_3_1740588939.4095378.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740588939.4095492
+  },
+  "episode_4_1740589000.2443125": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_4_1740589000.2443125.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589000.2443233
+  },
+  "episode_5_1740589061.0788105": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_5_1740589061.0788105.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589061.0788214
+  },
+  "episode_6_1740589121.9215782": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_6_1740589121.9215782.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589121.9215891
+  },
+  "episode_7_1740589182.7548919": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_7_1740589182.7548919.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589182.7549024
+  },
+  "episode_8_1740589243.5902705": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_8_1740589243.5902705.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589243.590281
+  },
+  "episode_9_1740589304.453443": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_9_1740589304.453443.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589304.4534545
+  },
+  "episode_0_1740589580.2378347": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_0_1740589580.2378347.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589580.2378478
+  },
+  "episode_1_1740589641.08072": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_1_1740589641.08072.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589641.0807269
+  },
+  "episode_2_1740589701.9151542": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_2_1740589701.9151542.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740589701.9151654
+  },
+  "episode_0_1740590247.343843": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_0_1740590247.343843.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740590247.3438537
+  },
+  "episode_1_1740590308.1909084": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_1_1740590308.1909084.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740590308.190919
+  },
+  "episode_2_1740590369.0354598": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_2_1740590369.0354598.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740590369.0354705
+  },
+  "episode_0_1740591333.204574": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_0_1740591333.204574.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591333.2045853
+  },
+  "episode_1_1740591394.0857246": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_1_1740591394.0857246.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591394.0857353
+  },
+  "episode_2_1740591454.9501405": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_2_1740591454.9501405.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591454.950151
+  },
+  "episode_3_1740591515.8109598": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_3_1740591515.8109598.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591515.8109717
+  },
+  "episode_4_1740591576.674269": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_4_1740591576.674269.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591576.6742797
+  },
+  "episode_5_1740591637.515914": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_5_1740591637.515914.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591637.515924
+  },
+  "episode_6_1740591698.3484707": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_6_1740591698.3484707.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591698.3484817
+  },
+  "episode_7_1740591759.1987872": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_7_1740591759.1987872.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591759.1987975
+  },
+  "episode_8_1740591820.0363245": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_8_1740591820.0363245.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591820.0363355
+  },
+  "episode_9_1740591880.876992": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_9_1740591880.876992.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740591880.877003
+  },
+  "episode_0_1740599501.2976892": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_0_1740599501.2976892.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599501.2976954
+  },
+  "episode_1_1740599552.3306353": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_1_1740599552.3306353.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599552.3306425
+  },
+  "episode_2_1740599603.3856647": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_2_1740599603.3856647.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599603.3856723
+  },
+  "episode_3_1740599654.3993797": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_3_1740599654.3993797.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599654.3993864
+  },
+  "episode_4_1740599705.4349022": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_4_1740599705.4349022.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599705.4349093
+  },
+  "episode_5_1740599756.4396024": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_5_1740599756.4396024.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599756.4396098
+  },
+  "episode_6_1740599807.4465098": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_6_1740599807.4465098.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599807.4465165
+  },
+  "episode_7_1740599858.413841": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_7_1740599858.413841.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599858.413848
+  },
+  "episode_8_1740599909.3926628": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_8_1740599909.3926628.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599909.3926694
+  },
+  "episode_9_1740599960.431588": {
+    "path": "/home/snigdha24/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories/episode_9_1740599960.431588.pkl",
+    "success": false,
+    "steps": 500,
+    "policy_version": "unknown",
+    "timestamp": 1740599960.4315948
+  }
+}

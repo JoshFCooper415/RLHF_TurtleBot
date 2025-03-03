@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TurtleBot3 Trajectory Comparison</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .container {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .trajectory {
+            flex: 1;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 15px;
+        }
+        .trajectory h2 {
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .metadata {
+            margin: 15px 0;
+            font-size: 14px;
+        }
+        .metadata-item {
+            margin-bottom: 5px;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin: 25px 0;
+        }
+        button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #prefA {
+            background-color: #4CAF50;
+            color: white;
+        }
+        #prefB {
+            background-color: #2196F3;
+            color: white;
+        }
+        #similar {
+            background-color: #9E9E9E;
+            color: white;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        .feedback {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #666;
+        }
+        .status {
+            text-align: center;
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+        svg {
+            display: block;
+            margin: 0 auto;
+            background-color: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Which TurtleBot3 trajectory is better?</h1>
+    
+    <div id="loading" class="loading">Loading trajectories...</div>
+    
+    <div id="content" style="display: none;">
+        <div class="container">
+            <div class="trajectory" id="traj1">
+                <h2>Trajectory A</h2>
+                <div id="vis1"></div>
+                <div id="metadata1" class="metadata"></div>
+            </div>
+            
+            <div class="trajectory" id="traj2">
+                <h2>Trajectory B</h2>
+                <div id="vis2"></div>
+                <div id="metadata2" class="metadata"></div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="prefA">Prefer A</button>
+            <button id="prefB">Prefer B</button>
+            <button id="similar">Similar/Can't Decide</button>
+        </div>
+        
+        <div class="feedback">
+            <h3>Feedback (optional):</h3>
+            <textarea id="feedbackText" rows="4" placeholder="Why did you prefer this trajectory? What made it better?"></textarea>
+        </div>
+        
+        <div id="status" class="status" style="display: none;"></div>
+    </div>
+    
+    <script>
+        let currentPair = null;
+        
+        // Fetch a pair of trajectories to compare
+        function fetchTrajectoryPair() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('content').style.display = 'none';
+            document.getElementById('status').style.display = 'none';
+            
+            fetch('/api/get_comparison_pair')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch trajectory pair');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    currentPair = data;
+                    renderTrajectories(data);
+                    
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('content').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('loading').textContent = 
+                        'Error loading trajectories: ' + error.message;
+                });
+        }
+        
+        // Render the trajectories
+        function renderTrajectories(data) {
+            // Clear previous visualizations
+            document.getElementById('vis1').innerHTML = '';
+            document.getElementById('vis2').innerHTML = '';
+            
+            // Visualization for Trajectory 1
+            visualizeTrajectory('vis1', data.trajectory1.visualization_data);
+            displayMetadata('metadata1', data.trajectory1.metadata);
+            
+            // Visualization for Trajectory 2
+            visualizeTrajectory('vis2', data.trajectory2.visualization_data);
+            displayMetadata('metadata2', data.trajectory2.metadata);
+        }
+        
+        // Visualize a trajectory using D3
+        function visualizeTrajectory(containerId, data) {
+            const width = 300;
+            const height = 300;
+            const margin = 30;
+            
+            // Extract data
+            const positions = data.positions;
+            const target = data.target_position;
+            
+            // Find the bounds of the data
+            let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+            
+            // Include positions in bounds calculation
+            positions.forEach(pos => {
+                xMin = Math.min(xMin, pos[0]);
+                xMax = Math.max(xMax, pos[0]);
+                yMin = Math.min(yMin, pos[1]);
+                yMax = Math.max(yMax, pos[1]);
+            });
+            
+            // Include target in bounds calculation
+            xMin = Math.min(xMin, target[0]);
+            xMax = Math.max(xMax, target[0]);
+            yMin = Math.min(yMin, target[1]);
+            yMax = Math.max(yMax, target[1]);
+            
+            // Add some padding
+            const padding = 1;
+            xMin -= padding;
+            xMax += padding;
+            yMin -= padding;
+            yMax += padding;
+            
+            // Create scales
+            const xScale = d3.scaleLinear()
+                .domain([xMin, xMax])
+                .range([margin, width - margin]);
+            
+            const yScale = d3.scaleLinear()
+                .domain([yMin, yMax])
+                .range([height - margin, margin]);
+            
+            // Create SVG
+            const svg = d3.select(`#${containerId}`)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+            
+            // Create a line generator
+            const line = d3.line()
+                .x(d => xScale(d[0]))
+                .y(d => yScale(d[1]))
+                .curve(d3.curveBasis);
+            
+            // Draw the path
+            svg.append('path')
+                .datum(positions)
+                .attr('fill', 'none')
+                .attr('stroke', '#1976D2')
+                .attr('stroke-width', 2)
+                .attr('d', line);
+            
+            // Draw the starting point
+            if (positions.length > 0) {
+                svg.append('circle')
+                    .attr('cx', xScale(positions[0][0]))
+                    .attr('cy', yScale(positions[0][1]))
+                    .attr('r', 6)
+                    .attr('fill', 'green');
+            }
+            
+            // Draw the ending point
+            if (positions.length > 0) {
+                svg.append('circle')
+                    .attr('cx', xScale(positions[positions.length - 1][0]))
+                    .attr('cy', yScale(positions[positions.length - 1][1]))
+                    .attr('r', 6)
+                    .attr('fill', data.success ? '#4CAF50' : '#F44336');
+            }
+            
+            // Draw the target
+            svg.append('circle')
+                .attr('cx', xScale(target[0]))
+                .attr('cy', yScale(target[1]))
+                .attr('r', 8)
+                .attr('fill', 'none')
+                .attr('stroke', '#FF9800')
+                .attr('stroke-width', 2)
+                .attr('stroke-dasharray', '3,3');
+            
+            // Add coordinate axes
+            // X-axis
+            svg.append('line')
+                .attr('x1', margin)
+                .attr('y1', height/2)
+                .attr('x2', width - margin)
+                .attr('y2', height/2)
+                .attr('stroke', '#ccc')
+                .attr('stroke-width', 1);
+            
+            // Y-axis
+            svg.append('line')
+                .attr('x1', width/2)
+                .attr('y1', margin)
+                .attr('x2', width/2)
+                .attr('y2', height - margin)
+                .attr('stroke', '#ccc')
+                .attr('stroke-width', 1);
+        }
+        
+        // Display metadata
+        function displayMetadata(containerId, metadata) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            // Format and display metadata
+            const items = [
+                { label: 'Success', value: metadata.success ? 'Yes' : 'No' },
+                { label: 'Steps', value: metadata.steps },
+                { label: 'Final Distance to Target', value: metadata.final_distance ? metadata.final_distance.toFixed(2) : 'N/A' }
+            ];
+            
+            items.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'metadata-item';
+                div.innerHTML = `<strong>${item.label}:</strong> ${item.value}`;
+                container.appendChild(div);
+            });
+        }
+        
+        // Submit preference
+        function submitPreference(preferred) {
+            if (!currentPair) return;
+            
+            const data = {
+                preferred: preferred === 'A' ? currentPair.trajectory1.id : 
+                           preferred === 'B' ? currentPair.trajectory2.id : 'similar',
+                rejected: preferred === 'A' ? currentPair.trajectory2.id : 
+                          preferred === 'B' ? currentPair.trajectory1.id : 'similar',
+                reason: document.getElementById('feedbackText').value,
+                confidence: 1.0
+            };
+            
+            fetch('/api/submit_preference', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to submit preference');
+                }
+                return response.json();
+            })
+            .then(result => {
+                const status = document.getElementById('status');
+                status.textContent = 'Preference submitted successfully! Loading new pair...';
+                status.className = 'status success';
+                status.style.display = 'block';
+                
+                // Clear feedback textarea
+                document.getElementById('feedbackText').value = '';
+                
+                // Load a new pair after a short delay
+                setTimeout(fetchTrajectoryPair, 1500);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                const status = document.getElementById('status');
+                status.textContent = 'Error submitting preference: ' + error.message;
+                status.className = 'status error';
+                status.style.display = 'block';
+            });
+        }
+        
+        // Add event listeners to buttons
+        document.getElementById('prefA').addEventListener('click', () => submitPreference('A'));
+        document.getElementById('prefB').addEventListener('click', () => submitPreference('B'));
+        document.getElementById('similar').addEventListener('click', () => submitPreference('similar'));
+        
+        // Load the first pair of trajectories when the page loads
+        document.addEventListener('DOMContentLoaded', fetchTrajectoryPair);
+    </script>
+</body>
+</html>
