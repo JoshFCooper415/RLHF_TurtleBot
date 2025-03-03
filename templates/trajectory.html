@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trajectory Details - TurtleBot3 RLHF Feedback</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Add styles for canvas-based visualization */
+        .trajectory-canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 4px;
+        }
+        .obstacle-info {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f8f8;
+            border-left: 3px solid #666;
+        }
+        .legend {
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        .legend-item {
+            display: inline-block;
+            margin-right: 15px;
+        }
+        .legend-color {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+        .start-point {
+            background-color: green;
+        }
+        .end-point.success {
+            background-color: #4CAF50;
+        }
+        .end-point.failure {
+            background-color: #F44336;
+        }
+        .target-point {
+            border: 2px dashed #FF9800;
+            background-color: transparent;
+        }
+        .obstacle-point {
+            background-color: rgba(128, 128, 128, 0.5);
+            border: 1px solid #666;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>TurtleBot3 Trajectory Details</h1>
+        <a href="{{ url_for('index') }}" class="back-btn">← Back to List</a>
+    </header>
+    
+    <main class="trajectory-detail">
+        <div class="trajectory-info">
+            <h2>Trajectory: {{ trajectory.filename }}</h2>
+            
+            <div class="trajectory-visualization">
+                {% if trajectory.plot_path %}
+                    <img src="{{ url_for('static', filename=trajectory.plot_path) }}" alt="Trajectory plot" class="full-size-plot">
+                {% else %}
+                    <div id="trajectory-canvas-container">
+                        <canvas id="trajectory-canvas" class="trajectory-canvas" width="600" height="600"></canvas>
+                        <div class="legend">
+                            <div class="legend">
+                                <div class="legend-item">
+                                    <span class="legend-color start-point"></span>
+                                    <span>Start</span>
+                                </div>
+                                <div class="legend-item">
+                                    <span class="legend-color end-point {% if trajectory.metadata.success %}success{% else %}failure{% endif %}"></span>
+                                    <span>End</span>
+                                </div>
+                                <div class="legend-item">
+                                    <span class="legend-color target-point"></span>
+                                    <span>Target</span>
+                                </div>
+                                <div class="legend-item">
+                                    <span class="legend-color obstacle-point"></span>
+                                    <span>Obstacle</span>
+                                </div>
+                            </div>
+                            </div>
+                        </div>
+                    </div>
+                    <script>
+                        document.addEventListener('DOMContentLoaded', function() {
+                            const container = document.getElementById('trajectory-canvas-container');
+                            if (container) {
+                                const trajectoryData = JSON.parse(container.getAttribute('data-trajectory'));
+                                renderTrajectoryCanvas(trajectoryData);
+                            }
+                        });
+                    
+                    </script>
+                {% endif %}
+            </div>
+            
+            <div class="trajectory-stats">
+                <h3>Statistics</h3>
+                <ul>
+                    {% if trajectory.metadata %}
+                        {% if trajectory.metadata.success is defined %}
+                            <li class="success-tag {% if trajectory.metadata.success %}success{% else %}failure{% endif %}">
+                                Outcome: {% if trajectory.metadata.success %}Success{% else %}Failure{% endif %}
+                            </li>
+                        {% endif %}
+                        
+                        {% if trajectory.metadata.steps %}
+                            <li>Steps: {{ trajectory.metadata.steps }}</li>
+                        {% endif %}
+                        
+                        {% if trajectory.metadata.final_distance %}
+                            <li>Final Distance to Target: {{ "%.2f"|format(trajectory.metadata.final_distance) }}m</li>
+                        {% endif %}
+                        
+                        {% if trajectory.rewards %}
+                            <li>Total Reward: {{ "%.2f"|format(sum(trajectory.rewards)) }}</li>
+                        {% endif %}
+                        
+                        {% if trajectory.metadata.obstacles or trajectory.obstacles %}
+                            <li class="obstacle-info">
+                                Obstacles: {{ (trajectory.metadata.obstacles|length) if trajectory.metadata.obstacles 
+                                               else (trajectory.obstacles|length) if trajectory.obstacles 
+                                               else 0 }}
+                            </li>
+                        {% endif %}
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+        
+        <div class="feedback-section">
+            <h3>Provide Feedback</h3>
+            
+            {% if feedback %}
+                <div class="existing-feedback">
+                    <h4>Existing Feedback</h4>
+                    {% for f in feedback %}
+                        <div class="feedback-item">
+                            <p>Rating: <span class="rating">{{ f.rating }}/5</span></p>
+                            {% if f.comment %}
+                                <p>Comment: {{ f.comment }}</p>
+                            {% endif %}
+                            <p class="feedback-time">Submitted: {{ f.timestamp }}</p>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            
+            <form id="feedback-form" class="feedback-form">
+                <input type="hidden" name="trajectory_id" value="{{ trajectory.filename }}">
+                
+                <div class="rating-input">
+                    <label>Rate this trajectory (1-5):</label>
+                    <div class="star-rating">
+                        <input type="radio" id="star5" name="rating" value="5" required>
+                        <label for="star5" title="5 stars">★</label>
+                        <input type="radio" id="star4" name="rating" value="4">
+                        <label for="star4" title="4 stars">★</label>
+                        <input type="radio" id="star3" name="rating" value="3">
+                        <label for="star3" title="3 stars">★</label>
+                        <input type="radio" id="star2" name="rating" value="2">
+                        <label for="star2" title="2 stars">★</label>
+                        <input type="radio" id="star1" name="rating" value="1">
+                        <label for="star1" title="1 star">★</label>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="comment">Comments (optional):</label>
+                    <textarea id="comment" name="comment" rows="4" placeholder="Enter any comments about this trajectory..."></textarea>
+                </div>
+                
+                <button type="submit" class="submit-btn">Submit Feedback</button>
+            </form>
+            
+            <div id="feedback-result" class="feedback-result hidden"></div>
+        </div>
+    </main>
+    
+    <footer>
+        <p>TurtleBot3 Reinforcement Learning from Human Feedback (RLHF)</p>
+    </footer>
+    
+    <script>
+        // Function to render trajectory on canvas (for when plot is not available)
+        function renderTrajectoryCanvas(data) {
+            const canvas = document.getElementById('trajectory-canvas');
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const margin = 40;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+            
+            // Extract trajectory positions
+            const positions = data.states.map(state => state.position);
+            
+            // Get target position if available
+            let targetPos = [0, 0];
+            if (data.metadata && data.metadata.target_position) {
+                targetPos = data.metadata.target_position;
+            }
+            
+            // Get obstacles
+            let obstacles = [];
+            if (data.metadata && data.metadata.obstacles) {
+                obstacles = data.metadata.obstacles;
+            } else if (data.obstacles) {
+                obstacles = data.obstacles;
+            }
+            
+            // Find bounds of all elements
+            let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+            
+            // Include positions
+            positions.forEach(pos => {
+                xMin = Math.min(xMin, pos[0]);
+                xMax = Math.max(xMax, pos[0]);
+                yMin = Math.min(yMin, pos[1]);
+                yMax = Math.max(yMax, pos[1]);
+            });
+            
+            // Include target
+            xMin = Math.min(xMin, targetPos[0]);
+            xMax = Math.max(xMax, targetPos[0]);
+            yMin = Math.min(yMin, targetPos[1]);
+            yMax = Math.max(yMax, targetPos[1]);
+            
+            // Include obstacles
+            obstacles.forEach(obs => {
+                if (Array.isArray(obs)) {
+                    // [x, y, radius] format
+                    if (obs.length >= 3) {
+                        xMin = Math.min(xMin, obs[0] - obs[2]);
+                        xMax = Math.max(xMax, obs[0] + obs[2]);
+                        yMin = Math.min(yMin, obs[1] - obs[2]);
+                        yMax = Math.max(yMax, obs[1] + obs[2]);
+                    } else if (obs.length >= 2) {
+                        xMin = Math.min(xMin, obs[0]);
+                        xMax = Math.max(xMax, obs[0]);
+                        yMin = Math.min(yMin, obs[1]);
+                        yMax = Math.max(yMax, obs[1]);
+                    }
+                } else if (typeof obs === 'object') {
+                    if (obs.position && obs.radius) {
+                        xMin = Math.min(xMin, obs.position[0] - obs.radius);
+                        xMax = Math.max(xMax, obs.position[0] + obs.radius);
+                        yMin = Math.min(yMin, obs.position[1] - obs.radius);
+                        yMax = Math.max(yMax, obs.position[1] + obs.radius);
+                    } else if (obs.position && (obs.size || obs.dimensions)) {
+                        const size = obs.size || obs.dimensions;
+                        xMin = Math.min(xMin, obs.position[0] - size[0]/2);
+                        xMax = Math.max(xMax, obs.position[0] + size[0]/2);
+                        yMin = Math.min(yMin, obs.position[1] - size[1]/2);
+                        yMax = Math.max(yMax, obs.position[1] + size[1]/2);
+                    }
+                }
+            });
+            
+            // Add padding
+            const padding = Math.max((xMax - xMin) * 0.1, (yMax - yMin) * 0.1, 0.5);
+            xMin -= padding;
+            xMax += padding;
+            yMin -= padding;
+            yMax += padding;
+            
+            // Create scale functions
+            const xScale = d => (d - xMin) / (xMax - xMin) * (width - 2 * margin) + margin;
+            const yScale = d => height - ((d - yMin) / (yMax - yMin) * (height - 2 * margin) + margin);
+            
+            // Draw background grid
+            ctx.strokeStyle = '#eee';
+            ctx.lineWidth = 1;
+            
+            // Draw grid lines
+            const gridStep = Math.ceil(Math.max(xMax - xMin, yMax - yMin) / 10);
+            
+            for (let x = Math.floor(xMin / gridStep) * gridStep; x <= xMax; x += gridStep) {
+                ctx.beginPath();
+                ctx.moveTo(xScale(x), margin);
+                ctx.lineTo(xScale(x), height - margin);
+                ctx.stroke();
+            }
+            
+            for (let y = Math.floor(yMin / gridStep) * gridStep; y <= yMax; y += gridStep) {
+                ctx.beginPath();
+                ctx.moveTo(margin, yScale(y));
+                ctx.lineTo(width - margin, yScale(y));
+                ctx.stroke();
+            }
+            
+            // Draw obstacles
+            ctx.fillStyle = 'rgba(128, 128, 128, 0.5)';
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            
+            obstacles.forEach(obs => {
+                if (Array.isArray(obs)) {
+                    // [x, y, radius] format
+                    if (obs.length >= 3) {
+                        ctx.beginPath();
+                        ctx.arc(xScale(obs[0]), yScale(obs[1]), xScale(obs[0] + obs[2]) - xScale(obs[0]), 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                    } else if (obs.length >= 2) {
+                        ctx.beginPath();
+                        ctx.arc(xScale(obs[0]), yScale(obs[1]), 5, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                    }
+                } else if (typeof obs === 'object') {
+                    if (obs.position && obs.radius) {
+                        ctx.beginPath();
+                        ctx.arc(
+                            xScale(obs.position[0]), 
+                            yScale(obs.position[1]), 
+                            xScale(obs.position[0] + obs.radius) - xScale(obs.position[0]), 
+                            0, Math.PI * 2
+                        );
+                        ctx.fill();
+                        ctx.stroke();
+                    } else if (obs.position && (obs.size || obs.dimensions)) {
+                        const size = obs.size || obs.dimensions;
+                        ctx.beginPath();
+                        ctx.rect(
+                            xScale(obs.position[0] - size[0]/2),
+                            yScale(obs.position[1] + size[1]/2),
+                            xScale(obs.position[0] + size[0]/2) - xScale(obs.position[0] - size[0]/2),
+                            yScale(obs.position[1] - size[1]/2) - yScale(obs.position[1] + size[1]/2)
+                        );
+                        ctx.fill();
+                        ctx.stroke();
+                    }
+                }
+            });
+            
+            // Draw trajectory path
+            ctx.strokeStyle = '#1976D2';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let i = 0; i < positions.length; i++) {
+                const [x, y] = positions[i];
+                if (i === 0) {
+                    ctx.moveTo(xScale(x), yScale(y));
+                } else {
+                    ctx.lineTo(xScale(x), yScale(y));
+                }
+            }
+            
+            ctx.stroke();
+            
+            // Draw starting point
+            if (positions.length > 0) {
+                const [x, y] = positions[0];
+                ctx.fillStyle = 'green';
+                ctx.beginPath();
+                ctx.arc(xScale(x), yScale(y), 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw ending point
+            if (positions.length > 0) {
+                const [x, y] = positions[positions.length - 1];
+                ctx.fillStyle = data.metadata && data.metadata.success ? '#4CAF50' : '#F44336';
+                ctx.beginPath();
+                ctx.arc(xScale(x), yScale(y), 6, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw target
+            ctx.strokeStyle = '#FF9800';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.arc(xScale(targetPos[0]), yScale(targetPos[1]), 8, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Draw axes
+            ctx.strokeStyle = '#ccc';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(margin, height/2);
+            ctx.lineTo(width - margin, height/2);
+            ctx.moveTo(width/2, margin);
+            ctx.lineTo(width/2, height - margin);
+            ctx.stroke();
+            
+            // Draw axis labels
+            ctx.fillStyle = '#666';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('x', width - margin + 15, height/2 + 4);
+            ctx.fillText('y', width/2, margin - 10);
+        }
+        
+        document.getElementById('feedback-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+            
+            const formData = new FormData(this);
+            
+            fetch('/submit_feedback', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultDiv = document.getElementById('feedback-result');
+                resultDiv.classList.remove('hidden');
+                
+                if (data.success) {
+                    resultDiv.classList.add('success');
+                    resultDiv.classList.remove('error');
+                    resultDiv.innerHTML = `${data.message}. Total feedback: ${data.feedback_count}`;
+                    
+                    // Reset form
+                    document.getElementById('feedback-form').reset();
+                    
+                    // Refresh page after a short delay
+                    setTimeout(() => {
+                        location.reload();
+                    }, 2000);
+                } else {
+                    resultDiv.classList.add('error');
+                    resultDiv.classList.remove('success');
+                    resultDiv.textContent = 'Error: ' + data.message;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                const resultDiv = document.getElementById('feedback-result');
+                resultDiv.classList.remove('hidden');
+                resultDiv.classList.add('error');
+                resultDiv.classList.remove('success');
+                resultDiv.textContent = 'Error submitting feedback. Please try again.';
+            });
+        });
+    </script>
+</body>
+</html>

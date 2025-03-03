@@ -14,6 +14,9 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'),
          glob(os.path.join('launch', '*.launch.py'))),
+        # Add world files if they're not included elsewhere
+        (os.path.join('share', package_name, 'worlds'),
+         glob(os.path.join('worlds', '*.world'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -29,6 +32,7 @@ setup(
             'train_cpu = turtlebot3_gym.train_cpu:main',
             'evaluate = turtlebot3_gym.evaluate_turtlebot3:main',
             'rlhf = turtlebot3_gym.rlhf_pipeline:main',
+            'parse_world = turtlebot3_gym.gazebo_world_parser:main',  # Add CLI for world parser
         ],
     },
 )

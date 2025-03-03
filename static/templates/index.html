@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TurtleBot3 RLHF Feedback</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>TurtleBot3 Trajectory Feedback</h1>
+        <div class="stats">
+            <p>Total Feedback: <span id="feedback-count">{{ feedback_count }}</span></p>
+            <p>Trajectories Rated: <span id="rated-count">{{ rated_count }}</span> / {{ total_count }}</p>
+            <button id="refresh-btn">Refresh Trajectories</button>
+        </div>
+    </header>
+    
+    <main>
+        <div class="trajectories">
+            <h2>Available Trajectories</h2>
+            
+            {% if trajectories %}
+                <div class="trajectory-list">
+                    {% for trajectory in trajectories %}
+                        <div class="trajectory-card">
+                            <h3>Trajectory: {{ trajectory.filename }}</h3>
+                            
+                            {% if trajectory.plot_path %}
+                                <div class="trajectory-preview">
+                                    <img src="{{ url_for('static', filename=trajectory.plot_path) }}" alt="Trajectory plot">
+                                </div>
+                            {% endif %}
+                            
+                            <div class="trajectory-meta">
+                                {% if trajectory.metadata %}
+                                    {% if trajectory.metadata.success is defined %}
+                                        <p class="success-tag {% if trajectory.metadata.success %}success{% else %}failure{% endif %}">
+                                            {% if trajectory.metadata.success %}Success{% else %}Failure{% endif %}
+                                        </p>
+                                    {% endif %}
+                                    
+                                    {% if trajectory.metadata.steps %}
+                                        <p>Steps: {{ trajectory.metadata.steps }}</p>
+                                    {% endif %}
+                                    
+                                    {% if trajectory.metadata.final_distance %}
+                                        <p>Final Distance: {{ "%.2f"|format(trajectory.metadata.final_distance) }}m</p>
+                                    {% endif %}
+                                {% endif %}
+                            </div>
+                            
+                            <a href="{{ url_for('view_trajectory', trajectory_id=trajectory.filename) }}" class="view-btn">View & Rate</a>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="no-trajectories">No trajectories available. Please collect some trajectories first.</p>
+            {% endif %}
+        </div>
+    </main>
+    
+    <footer>
+        <p>TurtleBot3 Reinforcement Learning from Human Feedback (RLHF)</p>
+    </footer>
+    
+    <script>
+        document.getElementById('refresh-btn').addEventListener('click', function() {
+            fetch('/refresh', {
+                method: 'POST',
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('feedback-count').textContent = data.feedback_count;
+                    document.getElementById('rated-count').textContent = data.rated_count;
+                    location.reload();
+                } else {
+                    alert('Error refreshing trajectories: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error refreshing trajectories');
+            });
+        });
+    </script>
+</body>
+</html>

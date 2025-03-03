@@ -10,7 +10,6 @@ import argparse
 from stable_baselines3 import PPO
 from turtlebot3_gym.rlhf.trajectory_manager import TrajectoryManager
 from turtlebot3_gym.rlhf.reward_model import RewardModel, RewardModelTrainer
-from turtlebot3_gym.envs.trajectory_collector import record_trajectory
 from turtlebot3_gym.rlhf.ppo_reward_callback import RewardModelCallback
 import subprocess
 import sys
@@ -36,6 +35,154 @@ def parse_args():
     
     return parser.parse_args()
 
+def get_default_obstacles():
+    """Return a set of default obstacles matching the simple_obstacles.world"""
+    return [
+        # Box
+        {
+            'type': 'rectangle',
+            'x': 2.0,
+            'y': 0.0,
+            'width': 1.0,
+            'height': 1.0
+        },
+        # Cylinder
+        {
+            'type': 'circle',
+            'x': 0.0,
+            'y': 2.0,
+            'radius': 0.5
+        },
+        # Wall (rotated rectangle)
+        {
+            'type': 'rectangle',
+            'x': -2.0,
+            'y': -1.0,
+            'width': 3.0,
+            'height': 0.2,
+            'rotation': 0.7
+        }
+    ]
+
+def collect_trajectories_directly(env, policy, num_episodes=10):
+    """Record complete trajectories using the given policy with explicit obstacle handling"""
+    trajectories = []
+    
+    # Unwrap the environment to access the original environment
+    original_env = env
+    while hasattr(original_env, 'env'):
+        original_env = original_env.env
+    
+    # Check if we reached our TurtleBot3Env
+    if not hasattr(original_env, 'target_position'):
+        print("Warning: Could not access target_position from environment")
+    
+    # Get the default obstacles to ensure we always have some
+    default_obstacles = get_default_obstacles()
+    
+    for episode in range(num_episodes):
+        # Create trajectory structure with direct inclusion of obstacles
+        trajectory = {
+            'id': f"episode_{episode}_{time.time()}",
+            'metadata': {
+                'policy_version': getattr(policy, 'version', 'unknown'),
+                'timestamp': time.time(),
+                'success': False,
+                'steps': 0,
+                'target_position': None,
+                'final_distance': 0.0,
+                'obstacles': default_obstacles,  # Always include default obstacles
+                'obstacle_count': len(default_obstacles)
+            },
+            'visualization_data': {
+                'positions': [],
+                'orientations': [],
+                'target_position': None,
+                'obstacles': default_obstacles,  # Always include default obstacles
+                'success': False,
+                'steps': 0
+            }
+        }
+        
+        # Try to get environment-specific obstacles if available
+        try:
+            if hasattr(original_env, 'get_obstacles'):
+                env_obstacles = original_env.get_obstacles()
+                if env_obstacles and len(env_obstacles) > 0:
+                    print(f"Found {len(env_obstacles)} obstacles in environment")
+                    trajectory['metadata']['obstacles'] = env_obstacles
+                    trajectory['visualization_data']['obstacles'] = env_obstacles
+                    trajectory['metadata']['obstacle_count'] = len(env_obstacles)
+        except Exception as e:
+            print(f"Error getting obstacles from environment: {e}")
+            # We already have default obstacles, so continue
+        
+        obs, _ = env.reset()
+        done = False
+        step = 0
+        
+        # Save the target position if available
+        if hasattr(original_env, 'target_position'):
+            target_pos = original_env.target_position.tolist()
+            trajectory['metadata']['target_position'] = target_pos
+            trajectory['visualization_data']['target_position'] = target_pos
+        
+        # Log what we're including in the trajectory
+        print(f"Trajectory includes {len(trajectory['visualization_data']['obstacles'])} obstacles")
+        
+        while not done and step < getattr(original_env, 'max_steps', 500):
+            # Get action from policy (handle both callable functions and stable-baselines models)
+            if hasattr(policy, 'predict'):
+                action, _ = policy.predict(obs)
+            else:
+                action = policy(obs)
+            
+            # Execute action and get result
+            next_obs, reward, done, truncated, info = env.step(action)
+            done = done or truncated
+            
+            # Record position and orientation
+            if hasattr(original_env, 'robot_position'):
+                position = original_env.robot_position.copy().tolist()
+                orientation = original_env.robot_orientation
+            else:
+                position = [0, 0]
+                orientation = 0
+                
+            # Add to visualization data
+            trajectory['visualization_data']['positions'].append(position)
+            trajectory['visualization_data']['orientations'].append(orientation)
+            
+            # Update for next step
+            obs = next_obs
+            step += 1
+        
+        # Add final outcome information
+        success = info.get('success', False)
+        trajectory['metadata']['success'] = success
+        trajectory['visualization_data']['success'] = success
+        trajectory['metadata']['steps'] = step
+        trajectory['visualization_data']['steps'] = step
+        
+        # Calculate final distance if possible
+        if hasattr(original_env, 'target_position') and hasattr(original_env, 'robot_position'):
+            trajectory['metadata']['final_distance'] = float(np.linalg.norm(
+                original_env.target_position - original_env.robot_position))
+        else:
+            trajectory['metadata']['final_distance'] = 0.0
+        
+        # Debug verification of obstacles
+        obstacle_count = len(trajectory['visualization_data']['obstacles'])
+        print(f"Final trajectory has {obstacle_count} obstacles in visualization_data")
+        
+        trajectories.append(trajectory)
+        print(f"Recorded trajectory {episode+1}/{num_episodes}: " +
+              f"Success={trajectory['metadata']['success']}, " +
+              f"Steps={trajectory['metadata']['steps']}, " +
+              f"Obstacles={trajectory['metadata']['obstacle_count']}")
+    
+    return trajectories
+
 def collect_trajectories(num_episodes=10, random_policy=True):
     """Collect trajectories for human feedback"""
     env = gym.make('TurtleBot3-v0')
@@ -56,7 +203,8 @@ def collect_trajectories(num_episodes=10, random_policy=True):
             print("No trained policy found, using random policy")
     
     print(f"Collecting {num_episodes} trajectories...")
-    trajectories = record_trajectory(env, policy, num_episodes=num_episodes)
+    # Use our direct implementation
+    trajectories = collect_trajectories_directly(env, policy, num_episodes=num_episodes)
     
     # Save trajectories
     for traj in trajectories:
@@ -68,6 +216,37 @@ def collect_trajectories(num_episodes=10, random_policy=True):
 def start_feedback_server():
     """Start the web server for human feedback collection"""
     from turtlebot3_gym.rlhf.feedback_server import app
+    
+    # Patch the feedback server to ensure obstacles are included in comparison pairs
+    try:
+        from turtlebot3_gym.rlhf.feedback_server import routes
+        
+        # Find the function that prepares comparison pairs
+        if hasattr(routes, 'get_comparison_pair'):
+            original_func = routes.get_comparison_pair
+            
+            def patched_get_comparison_pair():
+                result = original_func()
+                
+                # Ensure obstacles are included
+                if 'trajectory1' in result and 'visualization_data' in result['trajectory1']:
+                    if 'obstacles' not in result['trajectory1']['visualization_data'] or \
+                       result['trajectory1']['visualization_data']['obstacles'] is None:
+                        result['trajectory1']['visualization_data']['obstacles'] = get_default_obstacles()
+                
+                if 'trajectory2' in result and 'visualization_data' in result['trajectory2']:
+                    if 'obstacles' not in result['trajectory2']['visualization_data'] or \
+                       result['trajectory2']['visualization_data']['obstacles'] is None:
+                        result['trajectory2']['visualization_data']['obstacles'] = get_default_obstacles()
+                
+                return result
+            
+            # Replace the function
+            routes.get_comparison_pair = patched_get_comparison_pair
+            print("Successfully patched feedback server to include obstacles")
+    except Exception as e:
+        print(f"Could not patch feedback server: {e}")
+    
     print("Starting feedback server at http://localhost:5000")
     print("Press Ctrl+C to stop the server")
     app.run(debug=True, host='0.0.0.0', port=5000)

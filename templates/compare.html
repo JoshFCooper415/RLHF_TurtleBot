@@ -108,6 +108,19 @@
             border: 1px solid #eee;
             border-radius: 4px;
         }
+        .obstacle-circle {
+            fill: rgba(128, 128, 128, 0.5);
+            stroke: #666;
+            stroke-width: 1;
+        }
+        .obstacle-rect {
+            fill: rgba(128, 128, 128, 0.5);
+            stroke: #666;
+            stroke-width: 1;
+        }
+        .legend {
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -188,36 +201,128 @@
             visualizeTrajectory('vis2', data.trajectory2.visualization_data);
             displayMetadata('metadata2', data.trajectory2.metadata);
         }
-        
-        // Visualize a trajectory using D3
+                
+        // Replace the entire visualizeTrajectory function
         function visualizeTrajectory(containerId, data) {
             const width = 300;
             const height = 300;
             const margin = 30;
             
-            // Extract data
-            const positions = data.positions;
-            const target = data.target_position;
+            // Extract data - ensure we have valid arrays for all properties
+            const positions = Array.isArray(data.positions) ? data.positions : [];
+            const target = Array.isArray(data.target_position) ? data.target_position : [0, 0];
+            
+            // Handle different possible obstacle formats
+            let obstacles = [];
+            if (Array.isArray(data.obstacles)) {
+                obstacles = data.obstacles;
+            } else if (data.obstacles && typeof data.obstacles === 'object') {
+                obstacles = [data.obstacles]; // Single obstacle as object
+            }
+            
+            // Debug obstacle data - uncomment if needed
+            // console.log("Obstacles data:", JSON.stringify(obstacles));
             
             // Find the bounds of the data
             let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
             
             // Include positions in bounds calculation
             positions.forEach(pos => {
-                xMin = Math.min(xMin, pos[0]);
-                xMax = Math.max(xMax, pos[0]);
-                yMin = Math.min(yMin, pos[1]);
-                yMax = Math.max(yMax, pos[1]);
+                if (Array.isArray(pos) && pos.length >= 2) {
+                    xMin = Math.min(xMin, pos[0]);
+                    xMax = Math.max(xMax, pos[0]);
+                    yMin = Math.min(yMin, pos[1]);
+                    yMax = Math.max(yMax, pos[1]);
+                }
             });
             
             // Include target in bounds calculation
-            xMin = Math.min(xMin, target[0]);
-            xMax = Math.max(xMax, target[0]);
-            yMin = Math.min(yMin, target[1]);
-            yMax = Math.max(yMax, target[1]);
+            if (Array.isArray(target) && target.length >= 2) {
+                xMin = Math.min(xMin, target[0]);
+                xMax = Math.max(xMax, target[0]);
+                yMin = Math.min(yMin, target[1]);
+                yMax = Math.max(yMax, target[1]);
+            }
+            
+            // Ensure we have valid bounds before processing obstacles
+            if (xMin === Infinity) xMin = -5;
+            if (xMax === -Infinity) xMax = 5;
+            if (yMin === Infinity) yMin = -5;
+            if (yMax === -Infinity) yMax = 5;
+            
+            // Include obstacles in bounds calculation with robust handling
+            obstacles.forEach(obs => {
+                try {
+                    // Handle array format obstacles
+                    if (Array.isArray(obs)) {
+                        if (obs.length >= 3) {
+                            // [x, y, radius] format
+                            xMin = Math.min(xMin, obs[0] - obs[2]);
+                            xMax = Math.max(xMax, obs[0] + obs[2]);
+                            yMin = Math.min(yMin, obs[1] - obs[2]);
+                            yMax = Math.max(yMax, obs[1] + obs[2]);
+                        } else if (obs.length >= 2) {
+                            // [x, y] point format
+                            xMin = Math.min(xMin, obs[0]);
+                            xMax = Math.max(xMax, obs[0]);
+                            yMin = Math.min(yMin, obs[1]);
+                            yMax = Math.max(yMax, obs[1]);
+                        }
+                    } 
+                    // Handle object format obstacles
+                    else if (obs && typeof obs === 'object') {
+                        if (obs.type === 'circle' && typeof obs.x === 'number' && typeof obs.y === 'number' && typeof obs.radius === 'number') {
+                            xMin = Math.min(xMin, obs.x - obs.radius);
+                            xMax = Math.max(xMax, obs.x + obs.radius);
+                            yMin = Math.min(yMin, obs.y - obs.radius);
+                            yMax = Math.max(yMax, obs.y + obs.radius);
+                        } else if (obs.type === 'rectangle' && typeof obs.x === 'number' && typeof obs.y === 'number') {
+                            const width = obs.width || 1;
+                            const height = obs.height || 1;
+                            xMin = Math.min(xMin, obs.x - width/2);
+                            xMax = Math.max(xMax, obs.x + width/2);
+                            yMin = Math.min(yMin, obs.y - height/2);
+                            yMax = Math.max(yMax, obs.y + height/2);
+                        } else if (obs.type === 'point' && typeof obs.x === 'number' && typeof obs.y === 'number') {
+                            xMin = Math.min(xMin, obs.x);
+                            xMax = Math.max(xMax, obs.x);
+                            yMin = Math.min(yMin, obs.y);
+                            yMax = Math.max(yMax, obs.y);
+                        } else if (obs.position && Array.isArray(obs.position) && obs.position.length >= 2) {
+                            if (typeof obs.radius === 'number') {
+                                // Circle with position and radius
+                                xMin = Math.min(xMin, obs.position[0] - obs.radius);
+                                xMax = Math.max(xMax, obs.position[0] + obs.radius);
+                                yMin = Math.min(yMin, obs.position[1] - obs.radius);
+                                yMax = Math.max(yMax, obs.position[1] + obs.radius);
+                            } else if (obs.size && Array.isArray(obs.size) && obs.size.length >= 2) {
+                                // Rectangle with position and size
+                                xMin = Math.min(xMin, obs.position[0] - obs.size[0]/2);
+                                xMax = Math.max(xMax, obs.position[0] + obs.size[0]/2);
+                                yMin = Math.min(yMin, obs.position[1] - obs.size[1]/2);
+                                yMax = Math.max(yMax, obs.position[1] + obs.size[1]/2);
+                            } else if (obs.dimensions && Array.isArray(obs.dimensions) && obs.dimensions.length >= 2) {
+                                // Rectangle with position and dimensions
+                                xMin = Math.min(xMin, obs.position[0] - obs.dimensions[0]/2);
+                                xMax = Math.max(xMax, obs.position[0] + obs.dimensions[0]/2);
+                                yMin = Math.min(yMin, obs.position[1] - obs.dimensions[1]/2);
+                                yMax = Math.max(yMax, obs.position[1] + obs.dimensions[1]/2);
+                            } else {
+                                // Just a point
+                                xMin = Math.min(xMin, obs.position[0]);
+                                xMax = Math.max(xMax, obs.position[0]);
+                                yMin = Math.min(yMin, obs.position[1]);
+                                yMax = Math.max(yMax, obs.position[1]);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error processing obstacle:", obs, e);
+                }
+            });
             
             // Add some padding
-            const padding = 1;
+            const padding = Math.max((xMax - xMin) * 0.1, (yMax - yMin) * 0.1, 1);
             xMin -= padding;
             xMax += padding;
             yMin -= padding;
@@ -238,6 +343,88 @@
                 .attr('width', width)
                 .attr('height', height);
             
+            // Draw obstacles first (so they're behind the path)
+            obstacles.forEach(obstacle => {
+                try {
+                    if (Array.isArray(obstacle)) {
+                        // Handle array format obstacles
+                        if (obstacle.length >= 3) {
+                            // [x, y, radius] format
+                            svg.append('circle')
+                                .attr('cx', xScale(obstacle[0]))
+                                .attr('cy', yScale(obstacle[1]))
+                                .attr('r', xScale(obstacle[0] + obstacle[2]) - xScale(obstacle[0]))
+                                .attr('class', 'obstacle-circle');
+                        } else if (obstacle.length >= 2) {
+                            // [x, y] point format
+                            svg.append('circle')
+                                .attr('cx', xScale(obstacle[0]))
+                                .attr('cy', yScale(obstacle[1]))
+                                .attr('r', 5)
+                                .attr('class', 'obstacle-circle');
+                        }
+                    } else if (obstacle && typeof obstacle === 'object') {
+                        if (obstacle.type === 'circle' && typeof obstacle.x === 'number' && typeof obstacle.y === 'number') {
+                            const radius = obstacle.radius || 0.5;
+                            svg.append('circle')
+                                .attr('cx', xScale(obstacle.x))
+                                .attr('cy', yScale(obstacle.y))
+                                .attr('r', xScale(obstacle.x + radius) - xScale(obstacle.x))
+                                .attr('class', 'obstacle-circle');
+                        } else if (obstacle.type === 'rectangle' && typeof obstacle.x === 'number' && typeof obstacle.y === 'number') {
+                            const width = obstacle.width || 1;
+                            const height = obstacle.height || 1;
+                            svg.append('rect')
+                                .attr('x', xScale(obstacle.x - width/2))
+                                .attr('y', yScale(obstacle.y + height/2))
+                                .attr('width', xScale(obstacle.x + width/2) - xScale(obstacle.x - width/2))
+                                .attr('height', yScale(obstacle.y - height/2) - yScale(obstacle.y + height/2))
+                                .attr('class', 'obstacle-rect');
+                        } else if (obstacle.type === 'point' && typeof obstacle.x === 'number' && typeof obstacle.y === 'number') {
+                            svg.append('circle')
+                                .attr('cx', xScale(obstacle.x))
+                                .attr('cy', yScale(obstacle.y))
+                                .attr('r', 5)
+                                .attr('class', 'obstacle-circle');
+                        } else if (obstacle.position && Array.isArray(obstacle.position) && obstacle.position.length >= 2) {
+                            if (typeof obstacle.radius === 'number') {
+                                // Circle with position and radius
+                                svg.append('circle')
+                                    .attr('cx', xScale(obstacle.position[0]))
+                                    .attr('cy', yScale(obstacle.position[1]))
+                                    .attr('r', xScale(obstacle.position[0] + obstacle.radius) - xScale(obstacle.position[0]))
+                                    .attr('class', 'obstacle-circle');
+                            } else if (obstacle.size && Array.isArray(obstacle.size) && obstacle.size.length >= 2) {
+                                // Rectangle with position and size
+                                svg.append('rect')
+                                    .attr('x', xScale(obstacle.position[0] - obstacle.size[0]/2))
+                                    .attr('y', yScale(obstacle.position[1] + obstacle.size[1]/2))
+                                    .attr('width', xScale(obstacle.position[0] + obstacle.size[0]/2) - xScale(obstacle.position[0] - obstacle.size[0]/2))
+                                    .attr('height', yScale(obstacle.position[1] - obstacle.size[1]/2) - yScale(obstacle.position[1] + obstacle.size[1]/2))
+                                    .attr('class', 'obstacle-rect');
+                            } else if (obstacle.dimensions && Array.isArray(obstacle.dimensions) && obstacle.dimensions.length >= 2) {
+                                // Rectangle with position and dimensions
+                                svg.append('rect')
+                                    .attr('x', xScale(obstacle.position[0] - obstacle.dimensions[0]/2))
+                                    .attr('y', yScale(obstacle.position[1] + obstacle.dimensions[1]/2))
+                                    .attr('width', xScale(obstacle.position[0] + obstacle.dimensions[0]/2) - xScale(obstacle.position[0] - obstacle.dimensions[0]/2))
+                                    .attr('height', yScale(obstacle.position[1] - obstacle.dimensions[1]/2) - yScale(obstacle.position[1] + obstacle.dimensions[1]/2))
+                                    .attr('class', 'obstacle-rect');
+                            } else {
+                                // Just a point
+                                svg.append('circle')
+                                    .attr('cx', xScale(obstacle.position[0]))
+                                    .attr('cy', yScale(obstacle.position[1]))
+                                    .attr('r', 5)
+                                    .attr('class', 'obstacle-circle');
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error rendering obstacle:", obstacle, e);
+                }
+            });
+            
             // Create a line generator
             const line = d3.line()
                 .x(d => xScale(d[0]))
@@ -245,12 +432,14 @@
                 .curve(d3.curveBasis);
             
             // Draw the path
-            svg.append('path')
-                .datum(positions)
-                .attr('fill', 'none')
-                .attr('stroke', '#1976D2')
-                .attr('stroke-width', 2)
-                .attr('d', line);
+            if (positions.length > 1) {
+                svg.append('path')
+                    .datum(positions)
+                    .attr('fill', 'none')
+                    .attr('stroke', '#1976D2')
+                    .attr('stroke-width', 2)
+                    .attr('d', line);
+            }
             
             // Draw the starting point
             if (positions.length > 0) {
@@ -298,6 +487,106 @@
                 .attr('y2', height - margin)
                 .attr('stroke', '#ccc')
                 .attr('stroke-width', 1);
+            
+            // Add legend
+            const legend = svg.append('g')
+                .attr('class', 'legend')
+                .attr('transform', `translate(${width - margin - 80}, ${margin})`);
+            
+            // Starting point
+            legend.append('circle')
+                .attr('cx', 0)
+                .attr('cy', 0)
+                .attr('r', 4)
+                .attr('fill', 'green');
+            
+            legend.append('text')
+                .attr('x', 10)
+                .attr('y', 3)
+                .text('Start');
+            
+            // Ending point
+            legend.append('circle')
+                .attr('cx', 0)
+                .attr('cy', 20)
+                .attr('r', 4)
+                .attr('fill', data.success ? '#4CAF50' : '#F44336');
+            
+            legend.append('text')
+                .attr('x', 10)
+                .attr('y', 23)
+                .text('End');
+            
+            // Target
+            legend.append('circle')
+                .attr('cx', 0)
+                .attr('cy', 40)
+                .attr('r', 4)
+                .attr('fill', 'none')
+                .attr('stroke', '#FF9800')
+                .attr('stroke-width', 2)
+                .attr('stroke-dasharray', '2,2');
+            
+            legend.append('text')
+                .attr('x', 10)
+                .attr('y', 43)
+                .text('Target');
+            
+            // Obstacle (if any)
+            if (obstacles && obstacles.length > 0) {
+                legend.append('rect')
+                    .attr('x', -4)
+                    .attr('y', 56)
+                    .attr('width', 8)
+                    .attr('height', 8)
+                    .attr('class', 'obstacle-rect');
+                
+                legend.append('text')
+                    .attr('x', 10)
+                    .attr('y', 63)
+                    .text('Obstacle');
+            }
+        }
+
+        // Add this debugging function to help identify issues with the obstacle data
+        function debugTrajectoryData(data) {
+            console.log("Full trajectory data:", data);
+            console.log("Positions:", data.positions ? data.positions.length : 'none');
+            console.log("Target:", data.target_position);
+            console.log("Obstacles:", data.obstacles);
+            
+            // Check if obstacles exist but aren't being processed correctly
+            if (data.obstacles) {
+                if (Array.isArray(data.obstacles)) {
+                    console.log("Obstacle count:", data.obstacles.length);
+                    data.obstacles.forEach((obs, i) => {
+                        console.log(`Obstacle ${i}:`, JSON.stringify(obs));
+                    });
+                } else {
+                    console.log("Obstacles is not an array:", typeof data.obstacles);
+                }
+            } else {
+                console.log("No obstacles found in data");
+            }
+        }
+
+        // In the first HTML file, add this to the renderTrajectories function
+        function renderTrajectories(data) {
+            // Clear previous visualizations
+            document.getElementById('vis1').innerHTML = '';
+            document.getElementById('vis2').innerHTML = '';
+            
+            console.log("Trajectory 1 data:", JSON.stringify(data.trajectory1));
+            console.log("Trajectory 1 obstacles:", JSON.stringify(data.trajectory1.visualization_data.obstacles));
+            console.log("Trajectory 2 obstacles:", JSON.stringify(data.trajectory2.visualization_data.obstacles));
+            
+            // Visualization for Trajectory 1
+            visualizeTrajectory('vis1', data.trajectory1.visualization_data);
+            displayMetadata('metadata1', data.trajectory1.metadata);
+            
+            // Visualization for Trajectory 2
+            visualizeTrajectory('vis2', data.trajectory2.visualization_data);
+            displayMetadata('metadata2', data.trajectory2.metadata);
         }
         
         // Display metadata
@@ -309,7 +598,8 @@
             const items = [
                 { label: 'Success', value: metadata.success ? 'Yes' : 'No' },
                 { label: 'Steps', value: metadata.steps },
-                { label: 'Final Distance to Target', value: metadata.final_distance ? metadata.final_distance.toFixed(2) : 'N/A' }
+                { label: 'Final Distance to Target', value: metadata.final_distance ? metadata.final_distance.toFixed(2) : 'N/A' },
+                { label: 'Obstacles', value: metadata.obstacle_count || '0' }
             ];
             
             items.forEach(item => {

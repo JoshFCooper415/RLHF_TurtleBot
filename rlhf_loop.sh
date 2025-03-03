@@ -9,6 +9,8 @@ ITERATIONS=3          # Number of iterations to run
 TRAJECTORIES=10       # Number of trajectories to collect per iteration
 POLICY_STEPS=10000    # Steps for policy training
 REWARD_WEIGHT=0.3     # Weight for original reward vs learned reward
+USE_CUSTOM_WORLD=false  # Whether to use a custom world
+WORLD_FILE="simple_obstacles.world"  # Default custom world file
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -34,14 +36,25 @@ while [[ $# -gt 0 ]]; do
             REWARD_WEIGHT="$2"
             shift 2
             ;;
+        --custom-world)
+            USE_CUSTOM_WORLD=true
+            shift
+            ;;
+        --world-file)
+            WORLD_FILE="$2"
+            USE_CUSTOM_WORLD=true
+            shift 2
+            ;;
         --help)
             echo "Usage: ./rlhf_loop.sh [options]"
             echo "Options:"
             echo "  --feedback N       Set feedback threshold to N samples (default: 5)"
             echo "  --iterations N     Run N iterations of the RLHF loop (default: 3)"
-            echo "  --trajectories N   Collect N trajectories per iteration (default: 3)"
+            echo "  --trajectories N   Collect N trajectories per iteration (default: 10)"
             echo "  --policy-steps N   Train policy for N steps (default: 10000)"
             echo "  --reward-weight W  Set original reward weight to W (0-1) (default: 0.3)"
+            echo "  --custom-world     Use a custom world instead of empty world"
+            echo "  --world-file FILE  Specify custom world file (default: simple_obstacles.world)"
             echo "  --help             Show this help message"
             exit 0
             ;;
@@ -56,6 +69,15 @@ done
 # Ensure ROS2 is sourced
 source ~/ros2_ws/install/setup.bash
 export TURTLEBOT3_MODEL=burger
+
+# Prepare launch command
+if [ "$USE_CUSTOM_WORLD" = true ]; then
+    LAUNCH_CMD="ros2 launch turtlebot3_gym turtlebot3_gym.launch.py use_custom_world:=true world_file:=$WORLD_FILE"
+    echo "Using custom world: $WORLD_FILE"
+else
+    LAUNCH_CMD="ros2 launch turtlebot3_gym turtlebot3_gym.launch.py"
+    echo "Using default empty world"
+fi
 
 # Function to count feedback samples
 count_feedback() {
@@ -193,7 +215,7 @@ for ((i=1; i<=$ITERATIONS; i++)); do
     
     # Step 1: Collect trajectories
     echo "Step 1: Collecting $TRAJECTORIES trajectories..."
-    run_with_timeout "ros2 run turtlebot3_gym rlhf --collect_trajectories --num_trajectories $TRAJECTORIES" 600 "Collecting trajectories (timeout: 10 minutes)..."
+    run_with_timeout "ros2 run turtlebot3_gym rlhf --collect_trajectories --num_trajectories $TRAJECTORIES" 80 "Collecting trajectories (timeout: 10 minutes)..."
     
     # Step 2: Gather human feedback
     echo "Step 2: Starting feedback server. Please provide feedback on trajectories."
@@ -220,13 +242,13 @@ for ((i=1; i<=$ITERATIONS; i++)); do
 source ~/ros2_ws/install/setup.bash
 export TURTLEBOT3_MODEL=burger
 
-# Launch Gazebo
-ros2 launch turtlebot3_gym turtlebot3_gym.launch.py &
+# Launch Gazebo with potentially custom world
+$LAUNCH_CMD &
 GAZEBO_PID=\$!
 
 # Wait for Gazebo to initialize
-echo "Waiting for Gazebo to initialize (15 seconds)..."
-sleep 15
+echo "Waiting for Gazebo to initialize (30 seconds)..."
+sleep 30
 
 # Train the policy
 echo "Training policy for $POLICY_STEPS steps..."
@@ -251,13 +273,13 @@ EOF
 source ~/ros2_ws/install/setup.bash
 export TURTLEBOT3_MODEL=burger
 
-# Launch Gazebo
-ros2 launch turtlebot3_gym turtlebot3_gym.launch.py &
+# Launch Gazebo with potentially custom world
+$LAUNCH_CMD &
 GAZEBO_PID=\$!
 
 # Wait for Gazebo to initialize
-echo "Waiting for Gazebo to initialize (15 seconds)..."
-sleep 15
+echo "Waiting for Gazebo to initialize (30 seconds)..."
+sleep 30
 
 # Evaluate the policy
 echo "Evaluating policy..."
@@ -286,3 +308,6 @@ echo "               RLHF TRAINING COMPLETE"
 echo "=========================================================="
 echo "Completed $ITERATIONS iterations of the RLHF loop."
 echo "The final policy model is saved at ~/ros2_ws/src/turtlebot3_gym/policy_model.zip"
+
+
+THis is my modifed file, but I need to still update the feedback server to work correctly with the new files
