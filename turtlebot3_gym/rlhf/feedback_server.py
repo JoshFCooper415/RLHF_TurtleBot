@@ -1,718 +1,548 @@
 #!/usr/bin/env python3
 
+import os
+import json
+import random
+import time
+import numpy as np
+from flask import Flask, request, jsonify, render_template, send_from_directory
+import threading
 import rclpy
 from rclpy.node import Node
-from flask import Flask, render_template, request, jsonify, send_from_directory
-import threading
-import json
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
-import io
-import base64
-from datetime import datetime
-import traceback
-import pickle
-import time
-from turtlebot3_gym.rlhf.trajectory_manager import TrajectoryManager
+from rclpy.executors import SingleThreadedExecutor
+import logging
+import sys
+from turtlebot3_gym.gazebo_world_parser import get_obstacles_from_world
 
-class RLHFFeedbackServer(Node):
-    """
-    A Flask-based server for collecting human feedback on robot trajectories.
-    This server provides a web interface for humans to view, rate, and compare
-    robot trajectories for Reinforcement Learning from Human Feedback (RLHF).
-    """
+# Configure Flask app with correct template paths
+# Find the package directory to correctly reference templates and static files
+package_dir = os.path.expanduser("~/ros2_ws/src/turtlebot3_gym")
+template_dir = os.path.join(package_dir, "templates")
+static_dir = os.path.join(package_dir, "static")
+
+# Create app with properly configured template and static folders
+app = Flask(__name__, 
+            static_folder=static_dir, 
+            template_folder=template_dir)
+app.config['SECRET_KEY'] = 'rlhf_feedback_server_key'
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('feedback_server')
+
+# Global variables
+trajectories = []
+feedback_data = []
+pairwise_comparisons = []
+active_ros_node = None
+
+def get_obstacles():
+    """Get obstacles from Gazebo world file"""
+    try:
+        obstacles = get_obstacles_from_world(logger=logger)
+        logger.info(f"Loaded {len(obstacles)} obstacles from world file")
+        return obstacles
+    except Exception as e:
+        logger.error(f"Error loading obstacles from world file: {e}")
+        raise RuntimeError("Failed to load obstacles from world file")
+
+def ros_spin_thread(node):
+    """Thread function to spin the ROS node"""
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
     
-    def __init__(self):
-        super().__init__('rlhf_feedback_server')
-        
-        # Get package paths
-        self.package_path = os.path.expanduser('~/ros2_ws/src/turtlebot3_gym')
-        self.trajectories_path = os.path.join(self.package_path, 'turtlebot3_gym', 'rlhf', 'trajectories')
-        self.feedback_path = os.path.join(self.package_path, 'feedback_log.json')
-        
-        # Correct paths for static and template folders
-        self.static_path = os.path.join(self.package_path, 'static')
-        self.template_path = os.path.join(self.package_path, 'templates')
-        
-        # Create directory for saving plots if it doesn't exist
-        os.makedirs(os.path.join(self.static_path, 'plots'), exist_ok=True)
-        
-        # Initialize trajectory manager
-        self.trajectory_manager = TrajectoryManager()
-        
-        # Load existing feedback if available
-        self.feedback_data = []
-        if os.path.exists(self.feedback_path):
-            try:
-                with open(self.feedback_path, 'r') as f:
-                    self.feedback_data = json.load(f)
-                self.get_logger().info(f"Loaded {len(self.feedback_data)} existing feedback entries")
-            except json.JSONDecodeError:
-                self.get_logger().warning(f"Error decoding feedback file, starting with empty feedback data")
-        
-        # Load trajectories
-        self.trajectories = self._load_trajectories()
-        self.get_logger().info(f"Loaded {len(self.trajectories)} trajectories")
-        
-        self.get_logger().info("Feedback server initialized")
+    try:
+        executor.spin()
+    except Exception as e:
+        node.get_logger().error(f"Error in ROS executor: {e}")
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+
+def load_trajectories():
+    """Load trajectories from files in the trajectory directory"""
+    global trajectories
     
-    def _load_trajectories(self):
-        """Load all trajectory files from the trajectories directory"""
-        trajectories = []
-        
-        if not os.path.exists(self.trajectories_path):
-            self.get_logger().warning(f"Trajectories directory not found: {self.trajectories_path}")
-            return trajectories
-        
-        # Get a list of files in the directory
-        self.get_logger().info(f"Looking for trajectories in: {self.trajectories_path}")
-        files = os.listdir(self.trajectories_path)
-        self.get_logger().info(f"Found {len(files)} files in trajectory directory")
-        
-        # Load each pickle file (except index.json)
-        for filename in files:
-            if filename.endswith('.pkl'):
-                try:
-                    file_path = os.path.join(self.trajectories_path, filename)
-                    self.get_logger().info(f"Loading trajectory file: {filename}")
-                    
-                    with open(file_path, 'rb') as f:
-                        trajectory_data = pickle.load(f)
-                    
-                    # Add filename to the trajectory data
-                    trajectory_data['filename'] = filename
-                    
-                    # Ensure trajectory has complete structure with obstacles
-                    trajectory_data = self._ensure_trajectory_structure(trajectory_data)
-                    
-                    # Generate visualization
-                    plot_path = self._generate_trajectory_plot(trajectory_data, filename)
-                    trajectory_data['plot_path'] = plot_path
-                    
-                    # Add to trajectories list
-                    trajectories.append(trajectory_data)
-                    self.get_logger().info(f"Successfully loaded trajectory: {filename}")
-                except Exception as e:
-                    self.get_logger().error(f"Error loading trajectory {filename}: {e}")
-                    traceback.print_exc()
-        
-        # Sort trajectories by timestamp if available
-        trajectories.sort(key=lambda x: x.get('metadata', {}).get('timestamp', 0), reverse=True)
-        
-        return trajectories
+    trajectory_dir = os.path.expanduser("~/ros2_ws/src/turtlebot3_gym/turtlebot3_gym/rlhf/trajectories")
+    if not os.path.exists(trajectory_dir):
+        logger.warning(f"Trajectory directory not found: {trajectory_dir}")
+        return False
     
-    def _ensure_trajectory_structure(self, trajectory):
-        """Ensure trajectory has complete structure with obstacles"""
-        # Define default obstacles
-        default_obstacles = [
-            {"type": "rectangle", "x": 2.0, "y": 0.0, "width": 1.0, "height": 1.0},
-            {"type": "circle", "x": 0.0, "y": 2.0, "radius": 0.5},
-            {"type": "rectangle", "x": -2.0, "y": -1.0, "width": 3.0, "height": 0.2, "rotation": 0.7}
-        ]
-        
-        # Initialize metadata if missing
-        if 'metadata' not in trajectory:
-            trajectory['metadata'] = {}
-        
-        # Initialize visualization_data if missing
-        if 'visualization_data' not in trajectory:
-            trajectory['visualization_data'] = {}
-            
-            # If no positions in visualization_data, try to get from states
-            if 'positions' not in trajectory['visualization_data'] and 'states' in trajectory:
-                if all(isinstance(state, dict) and 'position' in state for state in trajectory['states']):
-                    trajectory['visualization_data']['positions'] = [state['position'] for state in trajectory['states']]
-                    if all('orientation' in state for state in trajectory['states']):
-                        trajectory['visualization_data']['orientations'] = [state['orientation'] for state in trajectory['states']]
-        
-        # Ensure target position exists in both places
-        if 'target_position' in trajectory['metadata']:
-            trajectory['visualization_data']['target_position'] = trajectory['metadata']['target_position']
-        elif 'target_position' in trajectory['visualization_data']:
-            trajectory['metadata']['target_position'] = trajectory['visualization_data']['target_position']
-        
-        # Check for obstacles in various locations
-        obstacles = None
-        
-        # Check visualization_data first
-        if 'obstacles' in trajectory['visualization_data'] and trajectory['visualization_data']['obstacles']:
-            obstacles = trajectory['visualization_data']['obstacles']
-        
-        # Then check metadata
-        elif 'obstacles' in trajectory['metadata'] and trajectory['metadata']['obstacles']:
-            obstacles = trajectory['metadata']['obstacles']
-        
-        # Then check top level
-        elif 'obstacles' in trajectory and trajectory['obstacles']:
-            obstacles = trajectory['obstacles']
-        
-        # Use default obstacles if none found
-        if not obstacles:
-            obstacles = default_obstacles
-            self.get_logger().info(f"No obstacles found in trajectory, using default obstacles")
-        
-        # Ensure obstacles exist in both metadata and visualization_data
-        trajectory['metadata']['obstacles'] = obstacles
-        trajectory['visualization_data']['obstacles'] = obstacles
-        trajectory['metadata']['obstacle_count'] = len(obstacles)
-        
-        # Ensure success and steps are consistent
-        if 'success' in trajectory['metadata']:
-            trajectory['visualization_data']['success'] = trajectory['metadata']['success']
-        elif 'success' in trajectory['visualization_data']:
-            trajectory['metadata']['success'] = trajectory['visualization_data']['success']
-        
-        if 'steps' in trajectory['metadata']:
-            trajectory['visualization_data']['steps'] = trajectory['metadata']['steps']
-        elif 'steps' in trajectory['visualization_data']:
-            trajectory['metadata']['steps'] = trajectory['visualization_data']['steps']
-            
-        return trajectory
+    # Load obstacles from world file
+    try:
+        obstacles = get_obstacles() 
+        print("test")
+        print(obstacles)
+    except Exception as e:
+        logger.error(f"Error getting obstacles: {e}")
+        return False
     
-    def _generate_trajectory_plot(self, trajectory, filename):
-        """Generate a visualization of the trajectory with obstacles"""
+    # Load index file if it exists
+    index_path = os.path.join(trajectory_dir, "index.json")
+    if os.path.exists(index_path):
         try:
-            # Get positions from visualization_data or states
-            positions = None
-            if 'visualization_data' in trajectory and 'positions' in trajectory['visualization_data']:
-                positions = trajectory['visualization_data']['positions']
-            elif 'states' in trajectory:
-                positions = [state['position'] for state in trajectory['states']]
-            
-            if not positions:
-                self.get_logger().warning(f"No position data found for trajectory {filename}")
-                return None
+            with open(index_path, 'r') as f:
+                index = json.load(f)
                 
-            x_positions = [pos[0] for pos in positions]
-            y_positions = [pos[1] for pos in positions]
+            loaded_trajectories = []
             
-            # Get target position
-            target_pos = None
-            if 'visualization_data' in trajectory and 'target_position' in trajectory['visualization_data']:
-                target_pos = trajectory['visualization_data']['target_position']
-            elif 'metadata' in trajectory and 'target_position' in trajectory['metadata']:
-                target_pos = trajectory['metadata']['target_position']
+            # Load each trajectory file from the index
+            for traj_id, traj_info in index.items():
+                traj_path = traj_info.get('path')
+                if traj_path and os.path.exists(traj_path):
+                    try:
+                        with open(traj_path, 'rb') as f:
+                            import pickle
+                            trajectory = pickle.load(f)
+                        
+                        # Ensure trajectory has ID
+                        if 'id' not in trajectory:
+                            trajectory['id'] = traj_id
+                            
+                        # Ensure complete structure
+                        trajectory = ensure_complete_structure(trajectory, obstacles)
+                        loaded_trajectories.append(trajectory)
+                    except Exception as e:
+                        logger.error(f"Error loading trajectory {traj_id}: {e}")
             
-            # Create figure
-            plt.figure(figsize=(8, 8))
+            trajectories = loaded_trajectories
+            logger.info(f"Loaded {len(trajectories)} trajectories from index")
             
-            # Plot trajectory
-            plt.plot(x_positions, y_positions, 'b-', label='Robot Path')
-            plt.scatter(x_positions[0], y_positions[0], color='green', s=100, marker='o', label='Start')
-            plt.scatter(x_positions[-1], y_positions[-1], color='red', s=100, marker='x', label='End')
-            
-            # Plot target if available
-            if target_pos:
-                plt.scatter(target_pos[0], target_pos[1], color='purple', s=100, marker='*', label='Target')
-            
-            # Get obstacles from visualization_data or metadata
-            obstacles = []
-            if 'visualization_data' in trajectory and 'obstacles' in trajectory['visualization_data']:
-                obstacles = trajectory['visualization_data']['obstacles']
-            elif 'metadata' in trajectory and 'obstacles' in trajectory['metadata']:
-                obstacles = trajectory['metadata']['obstacles']
-            elif 'obstacles' in trajectory:
-                obstacles = trajectory['obstacles']
-            
-            # Draw obstacles
-            for obstacle in obstacles:
-                try:
-                    # Check what kind of obstacle data we have
-                    if isinstance(obstacle, dict):
-                        if 'type' in obstacle and obstacle['type'] == 'circle':
-                            # Circle with type field
-                            circle = plt.Circle((obstacle['x'], obstacle['y']), obstacle['radius'], color='gray', alpha=0.7)
-                            plt.gca().add_patch(circle)
-                        elif 'type' in obstacle and obstacle['type'] == 'rectangle':
-                            # Rectangle with type field
-                            rect = plt.Rectangle(
-                                (obstacle['x'] - obstacle['width']/2, obstacle['y'] - obstacle['height']/2),
-                                obstacle['width'], obstacle['height'], color='gray', alpha=0.7
-                            )
-                            plt.gca().add_patch(rect)
-                        elif 'position' in obstacle and 'radius' in obstacle:
-                            # Circular obstacle with position field
-                            position = obstacle['position']
-                            radius = obstacle['radius']
-                            circle = plt.Circle((position[0], position[1]), radius, color='gray', alpha=0.7)
-                            plt.gca().add_patch(circle)
-                        elif 'position' in obstacle and ('size' in obstacle or 'dimensions' in obstacle):
-                            # Rectangular obstacle with position field
-                            position = obstacle['position']
-                            size = obstacle.get('size', obstacle.get('dimensions'))
-                            rect = plt.Rectangle(
-                                (position[0] - size[0]/2, position[1] - size[1]/2),
-                                size[0], size[1], color='gray', alpha=0.7
-                            )
-                            plt.gca().add_patch(rect)
-                        elif 'x' in obstacle and 'y' in obstacle and 'width' in obstacle and 'height' in obstacle:
-                            # Rectangle with explicit dimensions
-                            rect = plt.Rectangle(
-                                (obstacle['x'] - obstacle['width']/2, obstacle['y'] - obstacle['height']/2),
-                                obstacle['width'], obstacle['height'], color='gray', alpha=0.7
-                            )
-                            plt.gca().add_patch(rect)
-                    elif isinstance(obstacle, list) or isinstance(obstacle, tuple):
-                        # List/tuple format
-                        if len(obstacle) >= 3:  # Assuming [x, y, radius] format
-                            circle = plt.Circle((obstacle[0], obstacle[1]), obstacle[2], color='gray', alpha=0.7)
-                            plt.gca().add_patch(circle)
-                        elif len(obstacle) == 2:  # Just a point
-                            plt.scatter(obstacle[0], obstacle[1], color='gray', s=100, marker='s')
-                except Exception as e:
-                    self.get_logger().warning(f"Error drawing obstacle {obstacle}: {e}")
-            
-            # Add grid and labels
-            plt.grid(True)
-            plt.xlabel('X Position (m)')
-            plt.ylabel('Y Position (m)')
-            plt.title('Robot Trajectory with Obstacles')
-            
-            # Add obstacle to legend if we found obstacles
-            if obstacles:
-                # Create a dummy artist for the legend
-                from matplotlib.patches import Patch
-                obstacle_patch = Patch(color='gray', alpha=0.7, label='Obstacles')
-                handles, labels = plt.gca().get_legend_handles_labels()
-                handles.append(obstacle_patch)
-                plt.legend(handles=handles)
-            else:
-                plt.legend()
-            
-            # Equal aspect ratio for proper distance perception
-            plt.gca().set_aspect('equal', 'box')
-            
-            # Save plot to static directory
-            base_filename = os.path.splitext(filename)[0]
-            plot_filename = f"{base_filename}.png"
-            plot_path = os.path.join('plots', plot_filename)
-            full_plot_path = os.path.join(self.static_path, plot_path)
-            plt.savefig(full_plot_path)
-            plt.close()
-            
-            self.get_logger().info(f"Generated plot for {filename} at {full_plot_path}")
-            return plot_path
+            # Debug log to check obstacle presence
+            for i, traj in enumerate(trajectories[:3]):  # Log first 3 for brevity
+                has_obstacles = 'obstacles' in traj['visualization_data'] and traj['visualization_data']['obstacles']
+                obstacle_count = len(traj['visualization_data'].get('obstacles', []))
+                logger.info(f"Trajectory {i}: Has obstacles: {has_obstacles}, Count: {obstacle_count}")
+                
+            return True
         except Exception as e:
-            self.get_logger().error(f"Error generating plot for {filename}: {e}")
-            traceback.print_exc()
-            return None
+            logger.error(f"Error loading trajectory index: {e}")
     
-    def prepare_visualization_data(self, trajectory):
-        """Extract the necessary data for visualizing a trajectory including obstacles"""
-        # First make sure the trajectory has a consistent structure
-        trajectory = self._ensure_trajectory_structure(trajectory)
+    # If we couldn't load from index, look for pickle files directly
+    try:
+        traj_files = [f for f in os.listdir(trajectory_dir) if f.endswith('.pkl')]
+        loaded_trajectories = []
         
-        # Default obstacles as fallback
-        default_obstacles = [
-            {"type": "rectangle", "x": 2.0, "y": 0.0, "width": 1.0, "height": 1.0},
-            {"type": "circle", "x": 0.0, "y": 2.0, "radius": 0.5},
-            {"type": "rectangle", "x": -2.0, "y": -1.0, "width": 3.0, "height": 0.2, "rotation": 0.7}
-        ]
+        for traj_file in traj_files:
+            try:
+                file_path = os.path.join(trajectory_dir, traj_file)
+                with open(file_path, 'rb') as f:
+                    import pickle
+                    trajectory = pickle.load(f)
+                
+                # Ensure trajectory has ID
+                if 'id' not in trajectory:
+                    trajectory['id'] = os.path.splitext(traj_file)[0]
+                    
+                # Ensure complete structure with obstacles
+                trajectory = ensure_complete_structure(trajectory, obstacles)
+                loaded_trajectories.append(trajectory)
+            except Exception as e:
+                logger.error(f"Error loading trajectory {traj_file}: {e}")
         
-        # Get positions from visualization_data or states
-        positions = []
-        if 'visualization_data' in trajectory and 'positions' in trajectory['visualization_data']:
-            positions = trajectory['visualization_data']['positions']
-        elif 'states' in trajectory and trajectory['states']:
-            positions = [state['position'] for state in trajectory['states']]
+        trajectories = loaded_trajectories
+        logger.info(f"Loaded {len(trajectories)} trajectories directly from files")
         
-        # Get orientations if available
-        orientations = []
-        if 'visualization_data' in trajectory and 'orientations' in trajectory['visualization_data']:
-            orientations = trajectory['visualization_data']['orientations']
-        elif 'states' in trajectory and trajectory['states'] and 'orientation' in trajectory['states'][0]:
-            orientations = [state['orientation'] for state in trajectory['states']]
-        
-        # Get target position
-        target_position = None
-        if 'visualization_data' in trajectory and 'target_position' in trajectory['visualization_data']:
-            target_position = trajectory['visualization_data']['target_position']
-        elif 'metadata' in trajectory and 'target_position' in trajectory['metadata']:
-            target_position = trajectory['metadata']['target_position']
-        else:
-            target_position = [0, 0]  # Default if none found
-        
-        # Get success and steps info
-        success = False
-        if 'metadata' in trajectory and 'success' in trajectory['metadata']:
-            success = trajectory['metadata']['success']
-        elif 'visualization_data' in trajectory and 'success' in trajectory['visualization_data']:
-            success = trajectory['visualization_data']['success']
+        # Debug log to check obstacle presence
+        for i, traj in enumerate(trajectories[:3]):  # Log first 3 for brevity
+            has_obstacles = 'obstacles' in traj['visualization_data'] and traj['visualization_data']['obstacles']
+            obstacle_count = len(traj['visualization_data'].get('obstacles', []))
+            logger.info(f"Trajectory {i}: Has obstacles: {has_obstacles}, Count: {obstacle_count}")
             
-        steps = len(positions)
-        if 'metadata' in trajectory and 'steps' in trajectory['metadata']:
-            steps = trajectory['metadata']['steps']
-        elif 'visualization_data' in trajectory and 'steps' in trajectory['visualization_data']:
-            steps = trajectory['visualization_data']['steps']
+        return True
+    except Exception as e:
+        logger.error(f"Error loading trajectories from files: {e}")
+        return False
+
+def ensure_complete_structure(trajectory, obstacles):
+    """Ensure trajectory has complete structure with obstacles"""
+    # Initialize key sections if missing
+    if 'metadata' not in trajectory:
+        trajectory['metadata'] = {}
+    
+    if 'visualization_data' not in trajectory:
+        trajectory['visualization_data'] = {}
+    
+    # Ensure obstacles exist in both metadata and visualization_data
+    if 'obstacles' not in trajectory['metadata'] or not trajectory['metadata']['obstacles']:
+        trajectory['metadata']['obstacles'] = obstacles
+            
+    if 'obstacles' not in trajectory['visualization_data'] or not trajectory['visualization_data']['obstacles']:
+        trajectory['visualization_data']['obstacles'] = obstacles
+    
+    # Update obstacle count
+    trajectory['metadata']['obstacle_count'] = len(trajectory['metadata']['obstacles'])
+    
+    # Ensure other required fields exist
+    if 'positions' not in trajectory['visualization_data']:
+        trajectory['visualization_data']['positions'] = [[0, 0]]
+    
+    if 'target_position' not in trajectory['visualization_data']:
+        trajectory['visualization_data']['target_position'] = [1, 1]
+    
+    if 'success' not in trajectory['metadata']:
+        trajectory['metadata']['success'] = False
+    
+    if 'success' not in trajectory['visualization_data']:
+        trajectory['visualization_data']['success'] = trajectory['metadata']['success']
+    
+    if 'steps' not in trajectory['metadata']:
+        trajectory['metadata']['steps'] = len(trajectory['visualization_data']['positions'])
+    
+    return trajectory
+
+def load_feedback():
+    """Load existing feedback data"""
+    global feedback_data, pairwise_comparisons
+    
+    feedback_file = os.path.expanduser("~/ros2_ws/src/turtlebot3_gym/feedback_log.json")
+    if os.path.exists(feedback_file):
+        try:
+            with open(feedback_file, 'r') as f:
+                data = json.load(f)
+                
+            if isinstance(data, dict):
+                feedback_data = data.get('feedback', [])
+                pairwise_comparisons = data.get('comparisons', [])
+            elif isinstance(data, list):
+                feedback_data = data
+                
+            logger.info(f"Loaded {len(feedback_data)} feedback entries and {len(pairwise_comparisons)} comparisons")
+            return True
+        except Exception as e:
+            logger.error(f"Error loading feedback data: {e}")
+    
+    return False
+
+def save_feedback():
+    """Save feedback data to file"""
+    try:
+        feedback_file = os.path.expanduser("~/ros2_ws/src/turtlebot3_gym/feedback_log.json")
+        with open(feedback_file, 'w') as f:
+            json.dump({
+                'timestamp': time.time(),
+                'feedback': feedback_data,
+                'comparisons': pairwise_comparisons
+            }, f, indent=2)
+        logger.info(f"Saved {len(feedback_data)} feedback entries to {feedback_file}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving feedback: {e}")
+        return False
+
+def select_comparison_pair():
+    """Select two trajectories to compare"""
+    if len(trajectories) < 2:
+        logger.error("Not enough trajectories for comparison")
+        raise ValueError("Not enough trajectories for comparison")
+    
+    # Ensure we have obstacles for visualization
+    obstacles = get_obstacles()
+    
+    # Select two different trajectories
+    indices = random.sample(range(len(trajectories)), 2)
+    
+    # Helper function to create states from positions
+    def create_states_from_positions(positions):
+        return [{"position": pos} for pos in positions]
+    
+    # Create properly structured comparison data
+    pair = {
+        'trajectory1': {
+            'id': trajectories[indices[0]].get('id', f'traj_{indices[0]}'),
+            # Add states at the root level in the format expected by the visualizer
+            'states': create_states_from_positions(trajectories[indices[0]]['visualization_data'].get('positions', [[0, 0]])),
+            'visualization_data': {
+                'positions': trajectories[indices[0]]['visualization_data'].get('positions', [[0, 0]]),
+                'orientations': trajectories[indices[0]]['visualization_data'].get('orientations', [0]),
+                'target_position': trajectories[indices[0]]['visualization_data'].get('target_position', [1, 1]),
+                'obstacles': obstacles,  # Use obstacles from world file
+                'success': trajectories[indices[0]]['metadata'].get('success', False),
+                # Add states in visualization_data too
+                'states': create_states_from_positions(trajectories[indices[0]]['visualization_data'].get('positions', [[0, 0]]))
+            },
+            'metadata': {
+                'success': trajectories[indices[0]]['metadata'].get('success', False),
+                'steps': trajectories[indices[0]]['metadata'].get('steps', 0),
+                'final_distance': trajectories[indices[0]]['metadata'].get('final_distance', 1.0),
+                'obstacle_count': len(obstacles)
+            }
+        },
+        'trajectory2': {
+            'id': trajectories[indices[1]].get('id', f'traj_{indices[1]}'),
+            # Add states at the root level in the format expected by the visualizer
+            'states': create_states_from_positions(trajectories[indices[1]]['visualization_data'].get('positions', [[0, 0]])),
+            'visualization_data': {
+                'positions': trajectories[indices[1]]['visualization_data'].get('positions', [[0, 0]]),
+                'orientations': trajectories[indices[1]]['visualization_data'].get('orientations', [0]),
+                'target_position': trajectories[indices[1]]['visualization_data'].get('target_position', [1, 1]),
+                'obstacles': obstacles,  # Use obstacles from world file
+                'success': trajectories[indices[1]]['metadata'].get('success', False),
+                # Add states in visualization_data too
+                'states': create_states_from_positions(trajectories[indices[1]]['visualization_data'].get('positions', [[0, 0]]))
+            },
+            'metadata': {
+                'success': trajectories[indices[1]]['metadata'].get('success', False),
+                'steps': trajectories[indices[1]]['metadata'].get('steps', 0),
+                'final_distance': trajectories[indices[1]]['metadata'].get('final_distance', 1.0),
+                'obstacle_count': len(obstacles)
+            }
+        }
+    }
+    
+    # Log the structure for debugging
+    logger.info(f"Generated comparison with states arrays: " + 
+               f"T1 states: {len(pair['trajectory1']['states'])}, " +
+               f"T2 states: {len(pair['trajectory2']['states'])}")
+    
+    return pair
+
+def sanitize_trajectory_for_json(trajectory):
+    """Ensure trajectory data is JSON serializable"""
+    if isinstance(trajectory, dict):
+        result = {}
+        for key, value in trajectory.items():
+            if key == 'obstacles' and value is None:
+                # Replace None obstacles with obstacles from world file
+                result[key] = get_obstacles()
+            elif isinstance(value, (dict, list)):
+                result[key] = sanitize_trajectory_for_json(value)
+            elif isinstance(value, np.ndarray):
+                result[key] = value.tolist()
+            elif isinstance(value, np.float32) or isinstance(value, np.float64):
+                result[key] = float(value)
+            elif isinstance(value, np.int32) or isinstance(value, np.int64):
+                result[key] = int(value)
+            else:
+                result[key] = value
+        return result
+    elif isinstance(trajectory, list):
+        return [sanitize_trajectory_for_json(item) for item in trajectory]
+    else:
+        return trajectory
+
+# Flask routes
+@app.route('/')
+def index():
+    """Main page listing all trajectories"""
+    return render_template('index.html', 
+                          feedback_count=len(feedback_data),
+                          rated_count=len(pairwise_comparisons),
+                          total_count=len(trajectories),
+                          trajectories=trajectories)
+
+@app.route('/compare')
+def compare():
+    """Page for comparing trajectories"""
+    return render_template('compare.html')
+
+@app.route('/trajectory/<trajectory_id>')
+def view_trajectory(trajectory_id):
+    """View a single trajectory"""
+    # Find the trajectory
+    trajectory = None
+    for traj in trajectories:
+        if traj.get('id') == trajectory_id:
+            trajectory = traj
+            break
+    
+    if not trajectory:
+        return "Trajectory not found", 404
+    
+    # Get feedback for this trajectory
+    traj_feedback = [f for f in feedback_data if f.get('trajectory_id') == trajectory_id]
+    
+    # Ensure trajectory has obstacles
+    obstacles = get_obstacles()
+    if 'visualization_data' in trajectory:
+        trajectory['visualization_data']['obstacles'] = obstacles
+    if 'metadata' in trajectory:
+        trajectory['metadata']['obstacles'] = obstacles
+        trajectory['metadata']['obstacle_count'] = len(obstacles)
+    
+    return render_template('trajectory.html', 
+                           trajectory=trajectory,
+                           feedback=traj_feedback)
+
+@app.route('/refresh', methods=['POST'])
+def refresh_trajectories():
+    """Refresh the trajectory list"""
+    success = load_trajectories()
+    return jsonify({
+        'success': success,
+        'message': "Trajectories refreshed" if success else "Error refreshing trajectories",
+        'feedback_count': len(feedback_data),
+        'rated_count': len(set([f.get('trajectory_id') for f in feedback_data])),
+    })
+
+@app.route('/submit_feedback', methods=['POST'])
+def submit_feedback():
+    """Submit feedback for a trajectory"""
+    try:
+        trajectory_id = request.form.get('trajectory_id')
+        rating = int(request.form.get('rating', 0))
+        comment = request.form.get('comment', '')
         
-        # Create the basic visualization data structure
-        visualization_data = {
-            'positions': positions,
-            'orientations': orientations,
-            'target_position': target_position,
-            'steps': steps,
-            'success': success,
-            'obstacles': default_obstacles  # Default fallback
+        if not trajectory_id or rating < 1 or rating > 5:
+            return jsonify({
+                'success': False,
+                'message': "Invalid feedback data"
+            })
+        
+        # Create feedback entry
+        feedback_entry = {
+            'trajectory_id': trajectory_id,
+            'rating': rating,
+            'comment': comment,
+            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
         }
         
-        # Get obstacles from various possible locations
-        obstacles = None
-        if 'visualization_data' in trajectory and 'obstacles' in trajectory['visualization_data']:
-            obstacles = trajectory['visualization_data']['obstacles']
-        elif 'metadata' in trajectory and 'obstacles' in trajectory['metadata']:
-            obstacles = trajectory['metadata']['obstacles']
-        elif 'obstacles' in trajectory:
-            obstacles = trajectory['obstacles']
+        feedback_data.append(feedback_entry)
+        save_feedback()
         
-        # If we found obstacles, convert them to a standard format
-        if obstacles:
-            standardized_obstacles = []
-            for obstacle in obstacles:
-                try:
-                    if isinstance(obstacle, dict):
-                        if 'type' in obstacle:
-                            # Already in standard format, add directly
-                            if obstacle['type'] in ['rectangle', 'circle', 'point']:
-                                standardized_obstacles.append(obstacle)
-                        elif 'position' in obstacle and 'radius' in obstacle:
-                            # Circular obstacle with position field
-                            standardized_obstacles.append({
-                                'type': 'circle',
-                                'x': obstacle['position'][0],
-                                'y': obstacle['position'][1],
-                                'radius': obstacle['radius']
-                            })
-                        elif 'position' in obstacle and ('size' in obstacle or 'dimensions' in obstacle):
-                            # Rectangular obstacle with position field
-                            size = obstacle.get('size', obstacle.get('dimensions'))
-                            standardized_obstacles.append({
-                                'type': 'rectangle',
-                                'x': obstacle['position'][0],
-                                'y': obstacle['position'][1],
-                                'width': size[0],
-                                'height': size[1]
-                            })
-                    elif isinstance(obstacle, list) or isinstance(obstacle, tuple):
-                        if len(obstacle) >= 3:  # [x, y, radius] format
-                            standardized_obstacles.append({
-                                'type': 'circle',
-                                'x': obstacle[0],
-                                'y': obstacle[1],
-                                'radius': obstacle[2]
-                            })
-                        elif len(obstacle) == 2:  # Just a point
-                            standardized_obstacles.append({
-                                'type': 'point',
-                                'x': obstacle[0],
-                                'y': obstacle[1]
-                            })
-                except Exception as e:
-                    self.get_logger().warning(f"Error converting obstacle {obstacle}: {e}")
-            
-            # Only replace if we successfully converted obstacles
-            if standardized_obstacles:
-                visualization_data['obstacles'] = standardized_obstacles
-                self.get_logger().info(f"Using {len(standardized_obstacles)} standardized obstacles")
-            else:
-                self.get_logger().warning(f"No valid obstacles found, using defaults")
-        
-        # Log what we're returning
-        self.get_logger().info(f"Prepared visualization data with {len(visualization_data['obstacles'])} obstacles")
-        
-        return visualization_data    
-    
-    def create_flask_app(self):
-        """Create and configure the Flask application"""
-        # Log template directory and verify it exists
-        template_dir = self.template_path
-        self.get_logger().info(f"Template directory: {template_dir}")
-        self.get_logger().info(f"Template directory exists: {os.path.exists(template_dir)}")
-        
-        if os.path.exists(template_dir):
-            files = os.listdir(template_dir)
-            self.get_logger().info(f"Files in template directory: {files}")
-        
-        app = Flask(__name__, 
-                    template_folder=template_dir,
-                    static_folder=self.static_path)
-        
-        # Store reference to the server instance for route handlers
-        server = self
-        
-        @app.route('/')
-        def index():
-            try:
-                # Count how many trajectories have feedback
-                rated_trajectories = set()
-                for feedback in server.feedback_data:
-                    if 'trajectory_id' in feedback:
-                        rated_trajectories.add(feedback.get('trajectory_id', ''))
-                    elif 'preferred_trajectory' in feedback:
-                        rated_trajectories.add(feedback.get('preferred_trajectory', ''))
-                        rated_trajectories.add(feedback.get('rejected_trajectory', ''))
-                
-                server.get_logger().info(f"Rendering index page with {len(server.trajectories)} trajectories")
-                return render_template('index.html', 
-                                      trajectories=server.trajectories,
-                                      feedback_count=len(server.feedback_data),
-                                      rated_count=len(rated_trajectories),
-                                      total_count=len(server.trajectories))
-            except Exception as e:
-                server.get_logger().error(f"Error rendering index page: {e}")
-                traceback.print_exc()
-                return f"Error loading page: {str(e)}", 500
-        
-        @app.route('/compare')
-        def compare():
-            """Page for trajectory comparison"""
-            try:
-                return render_template('compare.html')
-            except Exception as e:
-                server.get_logger().error(f"Error rendering compare page: {e}")
-                traceback.print_exc()
-                return f"Error loading comparison page: {str(e)}", 500
-        
-        @app.route('/api/get_comparison_pair')
-        def get_comparison_pair():
-            """Get a pair of trajectories to compare"""
-            try:
-                # Use the trajectory manager to get a random pair if available
-                # Otherwise pick random trajectories from our loaded list
-                try:
-                    traj1, traj2 = server.trajectory_manager.get_random_pair()
-                except (AttributeError, Exception) as e:
-                    server.get_logger().warning(f"Could not use trajectory manager: {e}. Using local trajectories.")
-                    if len(server.trajectories) < 2:
-                        return jsonify({'error': 'Not enough trajectories available'}), 400
-                    
-                    import random
-                    traj1, traj2 = random.sample(server.trajectories, 2)
-                
-                # Prepare visualization data ensuring obstacles are included
-                viz_data1 = server.prepare_visualization_data(traj1)
-                viz_data2 = server.prepare_visualization_data(traj2)
-                
-                # Log obstacle counts for debugging
-                server.get_logger().info(f"Sending traj1 with {len(viz_data1['obstacles'])} obstacles")
-                server.get_logger().info(f"Sending traj2 with {len(viz_data2['obstacles'])} obstacles")
-                
-                # Build response
-                comparison_data = {
-                    'trajectory1': {
-                        'id': traj1.get('episode_id', traj1.get('filename', 'unknown')),
-                        'metadata': {
-                            'success': traj1.get('metadata', {}).get('success', False),
-                            'steps': traj1.get('metadata', {}).get('steps', 0),
-                            'final_distance': traj1.get('metadata', {}).get('final_distance', 0.0),
-                            'obstacle_count': len(viz_data1['obstacles'])
-                        },
-                        'visualization_data': viz_data1,
-                        'plot_path': traj1.get('plot_path', '')
-                    },
-                    'trajectory2': {
-                        'id': traj2.get('episode_id', traj2.get('filename', 'unknown')),
-                        'metadata': {
-                            'success': traj2.get('metadata', {}).get('success', False),
-                            'steps': traj2.get('metadata', {}).get('steps', 0),
-                            'final_distance': traj2.get('metadata', {}).get('final_distance', 0.0),
-                            'obstacle_count': len(viz_data2['obstacles'])
-                        },
-                        'visualization_data': viz_data2,
-                        'plot_path': traj2.get('plot_path', '')
-                    }
-                }
-                
-                return jsonify(comparison_data)
-            except Exception as e:
-                server.get_logger().error(f"Error getting comparison pair: {e}")
-                traceback.print_exc()
-                return jsonify({'error': str(e)}), 500
-        
-        @app.route('/api/debug_trajectory')
-        def debug_trajectory():
-            """Debug endpoint to help troubleshoot trajectory visualization issues"""
-            try:
-                # Get a random trajectory
-                if not server.trajectories:
-                    return jsonify({'error': 'No trajectories available'}), 404
-                
-                import random
-                trajectory = random.choice(server.trajectories)
-                
-                # Prepare visualization data
-                viz_data = server.prepare_visualization_data(trajectory)
-                
-                # Get a summary of the trajectory structure
-                structure_summary = {
-                    'has_visualization_data': 'visualization_data' in trajectory,
-                    'has_metadata': 'metadata' in trajectory,
-                    'has_states': 'states' in trajectory,
-                    'has_positions': 'positions' in viz_data,
-                    'has_obstacles': 'obstacles' in viz_data,
-                    'obstacle_count': len(viz_data.get('obstacles', [])),
-                    'first_obstacle': viz_data.get('obstacles', [])[0] if viz_data.get('obstacles', []) else None
-                }
-                
-                return jsonify({
-                    'trajectory_id': trajectory.get('episode_id', trajectory.get('filename', 'unknown')),
-                    'structure': structure_summary,
-                    'visualization_data': viz_data
-                })
-            except Exception as e:
-                server.get_logger().error(f"Error in debug_trajectory: {e}")
-                traceback.print_exc()
-                return jsonify({'error': str(e)}), 500
-        
-        @app.route('/trajectory/<trajectory_id>')
-        def view_trajectory(trajectory_id):
-            try:
-                # Find the trajectory
-                trajectory = None
-                for t in server.trajectories:
-                    if t['filename'] == trajectory_id or t.get('episode_id') == trajectory_id:
-                        trajectory = t
-                        break
-                
-                if not trajectory:
-                    return "Trajectory not found", 404
-                
-                # Check if this trajectory has feedback
-                existing_feedback = []
-                for feedback in server.feedback_data:
-                    if feedback.get('trajectory_id') == trajectory_id:
-                        existing_feedback.append(feedback)
-                
-                return render_template('trajectory.html', 
-                                      trajectory=trajectory,
-                                      feedback=existing_feedback)
-            except Exception as e:
-                server.get_logger().error(f"Error rendering trajectory page: {e}")
-                traceback.print_exc()
-                return f"Error loading trajectory: {str(e)}", 500
-        
-        @app.route('/submit_feedback', methods=['POST'])
-        def submit_feedback():
-            try:
-                # Extract data from form
-                trajectory_id = request.form.get('trajectory_id')
-                rating = float(request.form.get('rating'))
-                comment = request.form.get('comment', '')
-                
-                # Create feedback entry
-                feedback_entry = {
-                    'trajectory_id': trajectory_id,
-                    'rating': rating,
-                    'comment': comment,
-                    'timestamp': datetime.now().isoformat()
-                }
-                
-                # Add to feedback data
-                server.feedback_data.append(feedback_entry)
-                
-                # Save to file
-                with open(server.feedback_path, 'w') as f:
-                    json.dump(server.feedback_data, f, indent=2)
-                
-                return jsonify({'success': True, 
-                                'message': 'Feedback submitted successfully',
-                                'feedback_count': len(server.feedback_data)})
-            except Exception as e:
-                server.get_logger().error(f"Error submitting feedback: {e}")
-                traceback.print_exc()
-                return jsonify({'success': False, 'message': str(e)}), 500
-        
-        @app.route('/api/submit_preference', methods=['POST'])
-        def submit_preference():
-            """Record a human preference between two trajectories"""
-            try:
-                data = request.json
-                
-                preference = {
-                    'preferred_trajectory': data['preferred'],
-                    'rejected_trajectory': data['rejected'],
-                    'reason': data.get('reason', ''),
-                    'timestamp': datetime.now().isoformat(),
-                    'confidence': data.get('confidence', 1.0)
-                }
-                
-                server.feedback_data.append(preference)
-                
-                # Save feedback to disk
-                with open(server.feedback_path, 'w') as f:
-                    json.dump(server.feedback_data, f, indent=2)
-                
-                return jsonify({'status': 'success'})
-            except Exception as e:
-                server.get_logger().error(f"Error submitting preference: {e}")
-                traceback.print_exc()
-                return jsonify({'status': 'error', 'message': str(e)}), 500
-        
-        @app.route('/refresh', methods=['POST'])
-        def refresh_trajectories():
-            try:
-                # Reload trajectories
-                server.trajectories = server._load_trajectories()
-                
-                # Count how many trajectories have feedback
-                rated_trajectories = set()
-                for feedback in server.feedback_data:
-                    if 'trajectory_id' in feedback:
-                        rated_trajectories.add(feedback.get('trajectory_id', ''))
-                    elif 'preferred_trajectory' in feedback:
-                        rated_trajectories.add(feedback.get('preferred_trajectory', ''))
-                        rated_trajectories.add(feedback.get('rejected_trajectory', ''))
-                
-                return jsonify({
-                    'success': True,
-                    'trajectory_count': len(server.trajectories),
-                    'feedback_count': len(server.feedback_data),
-                    'rated_count': len(rated_trajectories)
-                })
-            except Exception as e:
-                server.get_logger().error(f"Error refreshing trajectories: {e}")
-                traceback.print_exc()
-                return jsonify({'success': False, 'message': str(e)}), 500
-        
-        return app
-    
-    def destroy_node(self):
-        """Clean up resources when shutting down"""
-        super().destroy_node()
+        return jsonify({
+            'success': True,
+            'message': "Feedback submitted successfully",
+            'feedback_count': len(feedback_data)
+        })
+    except Exception as e:
+        logger.error(f"Error submitting feedback: {e}")
+        return jsonify({
+            'success': False,
+            'message': f"Error: {str(e)}"
+        })
 
-def main(args=None):
+@app.route('/api/get_comparison_pair', methods=['GET'])
+def get_comparison_pair():
+    """API endpoint to get a pair of trajectories to compare"""
+    # Get the trajectories
+    pair = select_comparison_pair()
+    
+    # Sanitize data to ensure it's JSON serializable
+    sanitized_pair = sanitize_trajectory_for_json(pair)
+    
+    # Force obstacles if they're still missing (final check)
+    obstacles = get_obstacles()
+    if 'visualization_data' in sanitized_pair['trajectory1']:
+        if 'obstacles' not in sanitized_pair['trajectory1']['visualization_data'] or not sanitized_pair['trajectory1']['visualization_data']['obstacles']:
+            logger.warning("Adding obstacles to T1 before sending")
+            sanitized_pair['trajectory1']['visualization_data']['obstacles'] = obstacles
+    
+    if 'visualization_data' in sanitized_pair['trajectory2']:
+        if 'obstacles' not in sanitized_pair['trajectory2']['visualization_data'] or not sanitized_pair['trajectory2']['visualization_data']['obstacles']:
+            logger.warning("Adding obstacles to T2 before sending")
+            sanitized_pair['trajectory2']['visualization_data']['obstacles'] = obstacles
+    
+    # Add 'states' property based on positions for compatibility
+    for traj_key in ['trajectory1', 'trajectory2']:
+        if 'visualization_data' in sanitized_pair[traj_key]:
+            positions = sanitized_pair[traj_key]['visualization_data'].get('positions', [])
+            sanitized_pair[traj_key]['states'] = positions  # Add at root level
+            sanitized_pair[traj_key]['visualization_data']['states'] = positions  # Add in visualization_data too
+    
+    # Log the complete data structure being sent
+    import json
+    logger.info(f"Sending trajectory pair data: {json.dumps(sanitized_pair, indent=2)[:500]}...")  # Log first 500 chars
+    
+    logger.info(f"Final check - T1 has {len(sanitized_pair['trajectory1']['visualization_data'].get('obstacles', []))} obstacles")
+    logger.info(f"Final check - T2 has {len(sanitized_pair['trajectory2']['visualization_data'].get('obstacles', []))} obstacles")
+    
+    return jsonify(sanitized_pair)
+
+@app.route('/api/submit_preference', methods=['POST'])
+def submit_preference():
+    """API endpoint to submit preference data"""
+    try:
+        data = request.json
+        
+        # Validate required fields
+        if not all(key in data for key in ['preferred', 'rejected']):
+            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+        
+        # Record the feedback
+        feedback_entry = {
+            'timestamp': time.time(),
+            'preferred_trajectory': data['preferred'],
+            'rejected_trajectory': data['rejected'],
+            'reason': data.get('reason', ''),
+            'confidence': data.get('confidence', 1.0)
+        }
+        
+        feedback_data.append(feedback_entry)
+        
+        # Record the pairwise comparison
+        comparison = {
+            'preferred': data['preferred'],
+            'rejected': data['rejected']
+        }
+        pairwise_comparisons.append(comparison)
+        
+        # Save feedback to file
+        save_feedback()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error submitting preference: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """API endpoint to get statistics"""
+    return jsonify({
+        'trajectories': len(trajectories),
+        'feedback': len(feedback_data),
+        'comparisons': len(pairwise_comparisons)
+    })
+
+# Main function to start the server
+def start_server():
+    global active_ros_node
+    
     # Initialize ROS2
-    rclpy.init(args=args)
+    rclpy.init(args=None)
+    active_ros_node = Node('feedback_server_node')
     
-    # Create the ROS2 node
-    server = RLHFFeedbackServer()
-    
-    # Create the Flask app
-    app = server.create_flask_app()
-    
-    # Start a separate thread for ROS2 spinning
-    def spin_ros():
-        try:
-            rclpy.spin(server)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            server.destroy_node()
-            rclpy.shutdown()
-    
-    ros_thread = threading.Thread(target=spin_ros)
+    # Start ROS spinning thread
+    ros_thread = threading.Thread(target=ros_spin_thread, args=(active_ros_node,))
     ros_thread.daemon = True
     ros_thread.start()
+
+        
+    # Load trajectories and feedback
+    load_trajectories()
+    print("load_trajectories")
+    load_feedback()
     
-    # Run the Flask app in the main thread
+    # Check if templates directory exists
+    if not os.path.exists(template_dir):
+        logger.error(f"Templates directory not found: {template_dir}")
+        logger.error("Creating templates directory structure...")
+        
+        # Create template directory
+        os.makedirs(template_dir, exist_ok=True)
+        
+        # Copy templates from package
+        package_templates = os.path.join(package_dir, "templates")
+        if os.path.exists(package_templates):
+            import shutil
+            for template in os.listdir(package_templates):
+                src = os.path.join(package_templates, template)
+                dst = os.path.join(template_dir, template)
+                shutil.copy(src, dst)
+                logger.info(f"Copied template: {template}")
+    
+    # Start the Flask server
+    host = os.environ.get('FLASK_HOST', '0.0.0.0')
+    port = int(os.environ.get('FLASK_PORT', 5000))
+    
+    logger.info(f"Starting feedback server at http://{host}:{port}")
+    
     try:
-        server.get_logger().info("Starting Flask server at http://localhost:5000")
-        app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
-    except KeyboardInterrupt:
-        server.get_logger().info("Shutting down server")
-
-
-if __name__ == '__main__':
-    main()
+        app.run(host=host, port=port, debug=False)
+    except Exception as e:
+        logger.error(f"Error starting server: {e}")
+    finally:
+        # Clean up ROS resources
+        if active_ros_node:
+            active_ros_node.destroy_node()
+        rclpy.shutdown()

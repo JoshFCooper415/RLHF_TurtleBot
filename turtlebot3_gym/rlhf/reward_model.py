@@ -46,13 +46,21 @@ class RewardModelTrainer:
         """Convert preferences to training examples"""
         training_data = []
         
-        for pref in preferences:
+        # Handle both the original data structure and newer formats
+        if isinstance(preferences, dict) and 'feedback' in preferences:
+            preference_list = preferences['feedback']
+        elif isinstance(preferences, dict) and 'comparisons' in preferences:
+            preference_list = preferences['comparisons'] + preferences.get('feedback', [])
+        else:
+            preference_list = preferences
+        
+        for pref in preference_list:
             # Skip entries where human couldn't decide
-            if pref.get('preferred_trajectory') == 'similar':
+            preferred_id = pref.get('preferred_trajectory', pref.get('preferred'))
+            if preferred_id == 'similar':
                 continue
-                
-            preferred_id = pref['preferred_trajectory']
-            rejected_id = pref['rejected_trajectory']
+            
+            rejected_id = pref.get('rejected_trajectory', pref.get('rejected'))
             
             try:
                 preferred_traj = trajectory_manager.load_trajectory(preferred_id)
@@ -60,9 +68,9 @@ class RewardModelTrainer:
                 
                 # Convert observations to tensors
                 preferred_obs = [torch.tensor(obs, dtype=torch.float32) 
-                               for obs in preferred_traj['observations']]
+                            for obs in preferred_traj['observations']]
                 rejected_obs = [torch.tensor(obs, dtype=torch.float32) 
-                              for obs in rejected_traj['observations']]
+                            for obs in rejected_traj['observations']]
                 
                 # Create pairs of observations for comparison
                 # We can sample a few points from each trajectory

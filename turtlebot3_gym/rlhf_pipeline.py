@@ -11,6 +11,7 @@ from stable_baselines3 import PPO
 from turtlebot3_gym.rlhf.trajectory_manager import TrajectoryManager
 from turtlebot3_gym.rlhf.reward_model import RewardModel, RewardModelTrainer
 from turtlebot3_gym.rlhf.ppo_reward_callback import RewardModelCallback
+from turtlebot3_gym.gazebo_world_parser import get_obstacles_from_world
 import subprocess
 import sys
 
@@ -35,38 +36,17 @@ def parse_args():
     
     return parser.parse_args()
 
-def get_default_obstacles():
-    """Return a set of default obstacles matching the simple_obstacles.world"""
-    return [
-        # Box
-        {
-            'type': 'rectangle',
-            'x': 2.0,
-            'y': 0.0,
-            'width': 1.0,
-            'height': 1.0
-        },
-        # Cylinder
-        {
-            'type': 'circle',
-            'x': 0.0,
-            'y': 2.0,
-            'radius': 0.5
-        },
-        # Wall (rotated rectangle)
-        {
-            'type': 'rectangle',
-            'x': -2.0,
-            'y': -1.0,
-            'width': 3.0,
-            'height': 0.2,
-            'rotation': 0.7
-        }
-    ]
-
 def collect_trajectories_directly(env, policy, num_episodes=10):
     """Record complete trajectories using the given policy with explicit obstacle handling"""
     trajectories = []
+    
+    # Get obstacles from world file
+    try:
+        obstacles = get_obstacles_from_world()
+        print(f"Loaded {len(obstacles)} obstacles from world file")
+    except Exception as e:
+        print(f"Error loading obstacles from world file: {e}")
+        raise RuntimeError("Failed to load obstacles from world file")
     
     # Unwrap the environment to access the original environment
     original_env = env
@@ -76,9 +56,6 @@ def collect_trajectories_directly(env, policy, num_episodes=10):
     # Check if we reached our TurtleBot3Env
     if not hasattr(original_env, 'target_position'):
         print("Warning: Could not access target_position from environment")
-    
-    # Get the default obstacles to ensure we always have some
-    default_obstacles = get_default_obstacles()
     
     for episode in range(num_episodes):
         # Create trajectory structure with direct inclusion of obstacles
@@ -91,31 +68,19 @@ def collect_trajectories_directly(env, policy, num_episodes=10):
                 'steps': 0,
                 'target_position': None,
                 'final_distance': 0.0,
-                'obstacles': default_obstacles,  # Always include default obstacles
-                'obstacle_count': len(default_obstacles)
+                'obstacles': obstacles,  # Include obstacles from world file
+                'obstacle_count': len(obstacles)
             },
             'visualization_data': {
                 'positions': [],
                 'orientations': [],
                 'target_position': None,
-                'obstacles': default_obstacles,  # Always include default obstacles
+                'obstacles': obstacles,  # Include obstacles from world file
                 'success': False,
                 'steps': 0
-            }
+            },
+            'observations': []  # Store observations for reward model training
         }
-        
-        # Try to get environment-specific obstacles if available
-        try:
-            if hasattr(original_env, 'get_obstacles'):
-                env_obstacles = original_env.get_obstacles()
-                if env_obstacles and len(env_obstacles) > 0:
-                    print(f"Found {len(env_obstacles)} obstacles in environment")
-                    trajectory['metadata']['obstacles'] = env_obstacles
-                    trajectory['visualization_data']['obstacles'] = env_obstacles
-                    trajectory['metadata']['obstacle_count'] = len(env_obstacles)
-        except Exception as e:
-            print(f"Error getting obstacles from environment: {e}")
-            # We already have default obstacles, so continue
         
         obs, _ = env.reset()
         done = False
@@ -131,6 +96,9 @@ def collect_trajectories_directly(env, policy, num_episodes=10):
         print(f"Trajectory includes {len(trajectory['visualization_data']['obstacles'])} obstacles")
         
         while not done and step < getattr(original_env, 'max_steps', 500):
+            # Save observation for reward model training
+            trajectory['observations'].append(obs)
+            
             # Get action from policy (handle both callable functions and stable-baselines models)
             if hasattr(policy, 'predict'):
                 action, _ = policy.predict(obs)
@@ -171,9 +139,14 @@ def collect_trajectories_directly(env, policy, num_episodes=10):
         else:
             trajectory['metadata']['final_distance'] = 0.0
         
-        # Debug verification of obstacles
-        obstacle_count = len(trajectory['visualization_data']['obstacles'])
-        print(f"Final trajectory has {obstacle_count} obstacles in visualization_data")
+        # Double-check obstacles are still present
+        if not trajectory['visualization_data']['obstacles']:
+            print("WARNING: Obstacles disappeared from visualization_data, restoring them")
+            trajectory['visualization_data']['obstacles'] = obstacles
+        
+        if not trajectory['metadata']['obstacles']:
+            print("WARNING: Obstacles disappeared from metadata, restoring them")
+            trajectory['metadata']['obstacles'] = obstacles
         
         trajectories.append(trajectory)
         print(f"Recorded trajectory {episode+1}/{num_episodes}: " +
@@ -194,8 +167,9 @@ def collect_trajectories(num_episodes=10, random_policy=True):
             return env.action_space.sample()
     else:
         # Use the trained policy if available
-        if os.path.exists(os.path.expanduser('~/ros2_ws/src/turtlebot3_gym/policy_model.zip')):
-            policy = PPO.load(os.path.expanduser('~/ros2_ws/src/turtlebot3_gym/policy_model.zip'))
+        policy_path = os.path.expanduser('~/ros2_ws/src/turtlebot3_gym/policy_model.zip')
+        if os.path.exists(policy_path):
+            policy = PPO.load(policy_path)
             print("Using trained policy for trajectory collection")
         else:
             def policy(obs):
@@ -215,42 +189,22 @@ def collect_trajectories(num_episodes=10, random_policy=True):
 
 def start_feedback_server():
     """Start the web server for human feedback collection"""
-    from turtlebot3_gym.rlhf.feedback_server import app
-    
-    # Patch the feedback server to ensure obstacles are included in comparison pairs
     try:
-        from turtlebot3_gym.rlhf.feedback_server import routes
+        print("Starting feedback server at http://localhost:5000")
+        print("Press Ctrl+C to stop the server")
         
-        # Find the function that prepares comparison pairs
-        if hasattr(routes, 'get_comparison_pair'):
-            original_func = routes.get_comparison_pair
-            
-            def patched_get_comparison_pair():
-                result = original_func()
-                
-                # Ensure obstacles are included
-                if 'trajectory1' in result and 'visualization_data' in result['trajectory1']:
-                    if 'obstacles' not in result['trajectory1']['visualization_data'] or \
-                       result['trajectory1']['visualization_data']['obstacles'] is None:
-                        result['trajectory1']['visualization_data']['obstacles'] = get_default_obstacles()
-                
-                if 'trajectory2' in result and 'visualization_data' in result['trajectory2']:
-                    if 'obstacles' not in result['trajectory2']['visualization_data'] or \
-                       result['trajectory2']['visualization_data']['obstacles'] is None:
-                        result['trajectory2']['visualization_data']['obstacles'] = get_default_obstacles()
-                
-                return result
-            
-            # Replace the function
-            routes.get_comparison_pair = patched_get_comparison_pair
-            print("Successfully patched feedback server to include obstacles")
+        # Import the module and run its start_server function
+        from turtlebot3_gym.rlhf.feedback_server import start_server
+        start_server()
+    except ImportError as e:
+        print(f"Error importing feedback server: {e}")
+        print("Make sure the turtlebot3_gym package is installed correctly.")        
+    except ImportError as e:
+        print(f"Error importing feedback server: {e}")
+        print("Make sure the turtlebot3_gym package is installed correctly.")
     except Exception as e:
-        print(f"Could not patch feedback server: {e}")
-    
-    print("Starting feedback server at http://localhost:5000")
-    print("Press Ctrl+C to stop the server")
-    app.run(debug=True, host='0.0.0.0', port=5000)
-
+        print(f"Error starting feedback server: {e}")
+        
 def train_reward_model():
     """Train the reward model from human feedback"""
     manager = TrajectoryManager()
@@ -258,15 +212,27 @@ def train_reward_model():
     
     print("Loading human preferences...")
     preferences = trainer.load_preferences()
-    if len(preferences) == 0:
+    if not preferences:
         print("No human preferences found. Please collect feedback first.")
         return
     
-    print(f"Found {len(preferences)} preference data points")
+    if isinstance(preferences, dict):
+        # If it's a dict with 'feedback' key (newer format)
+        if 'comparisons' in preferences:
+            preference_data = preferences['comparisons']
+        elif 'feedback' in preferences:
+            preference_data = preferences['feedback']
+        else:
+            preference_data = []
+    else:
+        # If it's a list (older format)
+        preference_data = preferences
+        
+    print(f"Found {len(preference_data)} preference data points")
     
     # Prepare training data
     print("Preparing training data...")
-    training_data = trainer.prepare_training_data(preferences, manager)
+    training_data = trainer.prepare_training_data(preference_data, manager)
     
     if len(training_data) == 0:
         print("No valid training examples could be created. Please check your feedback data.")

@@ -207,7 +207,28 @@
             ctx.clearRect(0, 0, width, height);
             
             // Extract trajectory positions
-            const positions = data.states.map(state => state.position);
+            let positions = [];
+            if (data.states && Array.isArray(data.states)) {
+                // Handle case where states is an array of objects with position property
+                if (data.states[0] && data.states[0].position) {
+                    positions = data.states.map(state => state.position);
+                } 
+                // Handle case where states is just an array of positions
+                else {
+                    positions = data.states;
+                }
+            } else if (data.positions && Array.isArray(data.positions)) {
+                // Handle case where positions is directly available
+                positions = data.positions;
+            } else if (data.visualization_data && data.visualization_data.positions) {
+                // Handle case where positions is nested in visualization_data
+                positions = data.visualization_data.positions;
+            } else {
+                console.error("No position data found in trajectory");
+                // Provide a default to prevent errors
+                positions = [[0, 0]];
+            }
+            console.log("Processed positions:", positions);
             
             // Get target position if available
             let targetPos = [0, 0];

@@ -132,15 +132,21 @@ class TrajectoryManager:
         traj1 = self._ensure_complete_structure(traj1)
         traj2 = self._ensure_complete_structure(traj2)
         
+        # Create states arrays in expected format for visualization
+        def create_states_from_positions(positions):
+            return [{"position": pos} for pos in positions]
+        
         # Format for web interface
         return {
             'trajectory1': {
                 'id': traj1.get('id', traj1.get('episode_id', 'unknown')),
+                'states': create_states_from_positions(traj1['visualization_data']['positions']),
                 'visualization_data': {
                     'positions': traj1['visualization_data']['positions'],
                     'target_position': traj1['visualization_data']['target_position'],
                     'obstacles': traj1['visualization_data']['obstacles'],
-                    'success': traj1['metadata']['success']
+                    'success': traj1['metadata']['success'],
+                    'states': create_states_from_positions(traj1['visualization_data']['positions'])
                 },
                 'metadata': {
                     'success': traj1['metadata']['success'],
@@ -151,11 +157,13 @@ class TrajectoryManager:
             },
             'trajectory2': {
                 'id': traj2.get('id', traj2.get('episode_id', 'unknown')),
+                'states': create_states_from_positions(traj2['visualization_data']['positions']),
                 'visualization_data': {
                     'positions': traj2['visualization_data']['positions'],
                     'target_position': traj2['visualization_data']['target_position'],
                     'obstacles': traj2['visualization_data']['obstacles'],
-                    'success': traj2['metadata']['success']
+                    'success': traj2['metadata']['success'],
+                    'states': create_states_from_positions(traj2['visualization_data']['positions'])
                 },
                 'metadata': {
                     'success': traj2['metadata']['success'],
